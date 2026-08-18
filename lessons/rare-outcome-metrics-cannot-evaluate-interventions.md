@@ -1,0 +1,9 @@
+# An experiment whose outcome metric fires a handful of times cannot conclude, no matter how long it runs
+
+Before starting an A/B comparison, compute how many observations the chosen outcome metric needs to detect the effect size worth acting on. If the metric fires on a small fraction of units, the required sample is usually far beyond what the setting can produce, and the experiment should be redesigned rather than run.
+
+The mechanism is a floor effect. A metric that triggers twice across a couple hundred trials has almost no resolving power: the observed difference between arms is dominated by which arm happened to catch a rare event. The result reads like data and can be tabulated and charted, but it cannot distinguish a large improvement from a large regression. Worse, the experiment consumes months of real time before that becomes obvious, and the instinct on seeing an inconclusive result is to extend the run, which is exactly the wrong response when the limit is the metric rather than the duration.
+
+Randomization granularity compounds this. Assigning arms per long-lived session rather than per individual trial means the effective sample size is the number of sessions, not the number of trials, and per-session variation swamps the intervention.
+
+Apply this by pre-registering an outcome that fires on most units (a rate that is nearly always observable, a cost measure, a sampled quality rating) and by randomizing at the finest independent unit available. When an intervention has been evaluated and no benefit was found, put the burden of proof on re-enabling it, and require a different experimental design rather than the same design with more runs. Keep the measurement harness in place when disabling an intervention, and gate the intervention behind a single reversible switch, so a future evaluation starts from instrumentation that already works.
