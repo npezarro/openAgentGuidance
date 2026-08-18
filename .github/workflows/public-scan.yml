@@ -1,0 +1,83 @@
+name: public-content-scan
+
+# Backstop, not the primary gate. Content is screened locally before it is
+# pushed here, and that local screen is what must catch a leak: by the time
+# this workflow runs, the commit is already public and already in history.
+# This exists to catch the case where the local gate was bypassed, broken,
+# or skipped, and to make that loud rather than silent.
+#
+# Patterns live in the SENSITIVE_PATTERNS Actions secret, never in this file,
+# so the list itself is not published by the thing that enforces it. The job
+# reports only the offending FILENAME: public run logs stay clean.
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # A weekly full-tree sweep. Push-triggered scans only see added lines, so
+    # anything that landed before a pattern was added to the list would never
+    # be looked at again.
+    - cron: '0 8 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for sensitive identifiers
+        env:
+          SENSITIVE_PATTERNS: ${{ secrets.SENSITIVE_PATTERNS }}
+        run: |
+          set -euo pipefail
+          PAT="$RUNNER_TEMP/pat.txt"
+          printf '%s\n' "$SENSITIVE_PATTERNS" | grep -v '^[[:space:]]*$' > "$PAT" || true
+          if [ ! -s "$PAT" ]; then
+            echo "::error::SENSITIVE_PATTERNS secret not configured. Refusing to pass a scan that cannot fail."
+            exit 1
+          fi
+
+          # Scheduled runs sweep the whole tree; push/PR runs scan added lines.
+          viol=0
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if grep -E -q -f "$PAT" "$f" 2>/dev/null; then
+                echo "::error file=$f::Sensitive identifier present in a published file."
+                viol=1
+              fi
+            done < <(git ls-files)
+          else
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              git fetch -q origin "${{ github.base_ref }}"
+              RANGE="origin/${{ github.base_ref }}...HEAD"
+            else
+              BEFORE="${{ github.event.before }}"
+              if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                RANGE="HEAD"
+                PARENT="$(git rev-parse --verify -q HEAD~1 || true)"
+                [ -n "$PARENT" ] && RANGE="$PARENT HEAD"
+              else
+                RANGE="$BEFORE ${{ github.sha }}"
+              fi
+            fi
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if git diff --unified=0 $RANGE -- "$f" 2>/dev/null | grep '^+' | grep -v '^+++' \
+                   | grep -E -q -f "$PAT"; then
+                echo "::error file=$f::Sensitive identifier in added lines."
+                viol=1
+              fi
+            done < <(git diff --name-only $RANGE 2>/dev/null)
+          fi
+
+          if [ "$viol" -ne 0 ]; then
+            echo "::error::Public content scan FAILED. Content is ALREADY PUBLIC — treat as an incident, not a build failure: scrub the file, then assume the old content was fetched."
+            exit 1
+          fi
+          echo "Public content scan passed."
