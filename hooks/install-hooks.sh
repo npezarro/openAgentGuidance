@@ -7,7 +7,7 @@
 #   bash install-hooks.sh --all-local        # Install to ALL local repos (private too)
 #   bash install-hooks.sh /path/to/repo      # Install to specific repo
 #
-# Hooks call security-scan.sh from your private context repo to detect sensitive
+# Hooks call scripts/secret-scan.sh to detect secrets and private
 # identifiers before they reach a public remote.
 
 set -euo pipefail

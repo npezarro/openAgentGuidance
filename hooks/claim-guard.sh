@@ -277,7 +277,7 @@ if [ "$KIND" = "rsync --delete into /var/www" ]; then
   DEST=$(printf '%s' "$CMD" | grep -oE '/var/www/[A-Za-z0-9_.-]+' | tail -1)
   [ -z "$DEST" ] && exit 0
   APP=$(basename "$DEST")
-  REGISTRY="$HOME/repos/your private context repo/deploy-registry.json"
+  REGISTRY="${DEPLOY_REGISTRY:-$HOME/.config/open-agent-guidance/deploy-registry.json}"
   SVC="$APP"
   if [ -f "$REGISTRY" ]; then
     mapped=$(jq -r --arg a "$APP" \

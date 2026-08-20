@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pre-commit hook: blocks sensitive identifiers in ANY repo (private ones too).
 # Scans staged changes for sensitive identifiers before allowing commit.
-# Uses security-scan.sh from your private context repo for pattern matching.
+# Uses scripts/secret-scan.sh for pattern matching (override with SCAN_SCRIPT).
 # Enforces on private repos too; visibility only selects the wording.
 #
 # Install: bash hooks/install-hooks.sh
@@ -15,7 +15,7 @@ SCAN_SCRIPT="${SCAN_SCRIPT:-$HOME/repos/openAgentGuidance/scripts/secret-scan.sh
 
 if [ ! -x "$SCAN_SCRIPT" ]; then
   echo "WARNING: security-scan.sh not found at $SCAN_SCRIPT"
-  echo "Skipping sensitive identifier check. Install your private context repo to enable."
+  echo "Skipping sensitive identifier check: no scanner at $SCAN_SCRIPT."
   exit 0
 fi
 
@@ -58,7 +58,7 @@ if echo "$SCAN_OUTPUT" | grep -q "BLOCKED"; then
   echo ""
   visibility_notice "$VISIBILITY" "$REPO_SLUG"
   echo "Fix the violations above before committing."
-  echo "See ~/repos/your private context repo/sensitive-identifiers.md for replacement values."
+  echo "Add identifiers with: bash scripts/secret-scan.sh --init"
   echo ""
   echo "To bypass (emergency only): git commit --no-verify"
   exit 1

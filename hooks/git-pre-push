@@ -15,7 +15,7 @@ SCAN_SCRIPT="${SCAN_SCRIPT:-$HOME/repos/openAgentGuidance/scripts/secret-scan.sh
 
 if [ ! -x "$SCAN_SCRIPT" ]; then
   echo "WARNING: security-scan.sh not found at $SCAN_SCRIPT"
-  echo "Skipping pre-push security scan. Install your private context repo to enable."
+  echo "Skipping pre-push security scan: no scanner at $SCAN_SCRIPT."
   exit 0
 fi
 
@@ -110,7 +110,7 @@ while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
     echo ""
     visibility_notice "$VISIBILITY" "$REPO_SLUG"
     echo "Fix the violations above before pushing."
-    echo "See ~/repos/your private context repo/sensitive-identifiers.md for replacement values."
+    echo "Add identifiers with: bash scripts/secret-scan.sh --init"
     echo ""
     FOUND_ISSUES=1
   fi

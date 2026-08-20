@@ -88,7 +88,7 @@ if [ "$VISIBILITY" = "PUBLIC" ]; then
 $ATTRIB
 
 Rewrite it to state the rule and the evidence, dropping who asked. Put the
-quote, the date, and the requester in your private context repo commit instead."
+quote, the date, and the requester in your private context repo instead."
   fi
 fi
 
