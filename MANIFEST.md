@@ -25,7 +25,7 @@ Wire `--check` into CI so a new guidance file cannot land undiscoverable. A file
 | `guidance/debugging.md` | diagnosing issues, log analysis |
 | `guidance/deep-research.md` | research depth and methodology before producing guides or recommendations |
 | `guidance/dependencies.md` | evaluating and adding packages |
-| `guidance/fact-checking.md` | verifying external, actionable claims (prices, eligibility rules, offers, versions) before asserting them |
+| `guidance/fact-checking.md` | mandatory search-verification of external actionable claims (prices, eligibility rules, offers) before asserting |
 | `guidance/git-workflow.md` | branching, PRs, merge procedures, commit messages |
 | `guidance/learning-capture.md` | when and where to persist operational learnings |
 | `guidance/measurement-windows.md` | auditing a logger/collector's coverage, or a metric whose denominator comes from a different source than its numerator |

@@ -1,7 +1,7 @@
 <!-- Load when: writing and running tests, cross-layer invariants -->
 # Testing Guidance
 
-Detailed testing standards that extend your core agent rules.
+Detailed testing standards that extend the core behavioural rules.
 
 ## When to Test
 
@@ -52,11 +52,11 @@ describe('functionName', () => {
 
 ## Fallback Chains Hide Dead Rungs (test each branch in isolation)
 
-A fallback/waterfall (try A, else B, else C) is the highest-risk structure for a **silent miss**: if an early rung dies, a later rung catches everything and the end-to-end result still looks correct, so nothing appears broken. The dead layer is invisible until the day the layer below it also fails. A token refresh once ran at 0% success for weeks behind a fallback that kept the end state healthy.
+A fallback/waterfall (try A, else B, else C) is the highest-risk structure for a **silent miss**: if an early rung dies, a later rung catches everything and the end-to-end result still looks correct, so nothing appears broken. The dead layer is invisible until the day the layer below it also fails.
 
 - **Test each rung/branch on its own**, with an input it MUST handle, not just the end-to-end happy path. If rung 1 is supposed to handle server-rendered pages, prove it does with the *later rungs disabled* (a `--max-rung`/`--from-rung`-style flag, a forced-branch fixture, dependency stubs). End-to-end green is necessary but not sufficient.
 - **Ship a canary** for any fallback you rely on: assert the winning rung, not just that content came back. If rung 1 stops winning on a case it owns, fail loudly.
-- **Verify the actual artifact, run the real code path, never a reimplementation of it.** An isolated check once used `open(file)` while the real script read the same data from stdin; the paraphrase passed while the real path was dead (a `python3 - <<HEREDOC` invocation had shadowed stdin). Testing a rewrite of the logic gives false confidence; drive the shipped script/function itself.
+- **Verify the actual artifact, run the real code path, never a reimplementation of it.** An isolated check once used `open(file)` while the real script read the same data from stdin; the paraphrase passed while the real path was dead (a `python3 - <<HEREDOC` had shadowed stdin). Testing a rewrite of the logic gives false confidence; drive the shipped script/function itself.
 
 ## What NOT to Test
 
@@ -86,20 +86,15 @@ const token = fakeOAuthToken();
 
 ## Testing Shell Scripts: Don't Stub a Binary on PATH, Stand Up the Real Sink
 
-Shell scripts that alert (webhook, email, HTTP callback) need their alert path tested, and
-the instinct is to drop a fake `curl` earlier on `PATH`. **This silently measures nothing** whenever
-the script hardens its own `PATH`, which cron-safe scripts typically do:
+Shell scripts that alert (webhook, email, HTTP callback) need their alert path tested, and the instinct is to drop a fake `curl` earlier on `PATH`. **This silently measures nothing** whenever the script hardens its own `PATH`, which cron-safe scripts commonly do:
 
 ```bash
-export PATH="$(dirname "$(command -v node)"):$(dirname "$SOME_BIN"):$PATH"
+export PATH="$(dirname "$(command -v node)"):$PATH"
 ```
 
-That prepends `/usr/bin`, so the system `curl` wins the lookup and the stub is never called. The test
-then passes for the wrong reason: zero alerts recorded, interpreted as "suppression works." Verified
-live: the first harness for an auth-probe script reported all-pass while observing nothing at all.
+That prepends `/usr/bin`, so the system `curl` wins the lookup and the stub is never called. The test then passes for the wrong reason: zero alerts recorded, interpreted as "suppression works." Observed live: the first harness for an auth-probe script reported all-pass while observing nothing at all.
 
-**Instead, bind a real listener and point the script's own webhook variable at it.** It exercises the
-actual `curl` invocation, actual JSON payload, and actual HTTP semantics:
+**Instead, bind a real listener and point the script's own webhook variable at it.** It exercises the actual `curl` invocation, actual JSON payload, and actual HTTP semantics:
 
 ```bash
 python3 - "$SINK" > "$T/port" 2>/dev/null <<'PY' &
@@ -120,14 +115,9 @@ export WEBHOOK_VAR="http://127.0.0.1:$(cat "$T/port")/hook"
 
 Companion rules for the same class of script:
 
-- **Always add an `env -i PATH=/usr/bin:/bin HOME=$HOME` case.** Cron's PATH omits `/usr/local/bin`,
-  and that presents as exit 127 *before* any logic runs. A suite that only runs under your
-  interactive shell cannot see it.
-- **Test the state-file upgrade path.** Changing a marker format (bare `touch` → structured) must be
-  exercised against the OLD format, or the first deploy inherits broken behaviour during a live
-  incident.
-- **`curl ... || true` is untestable by construction and unsafe in production**: a revoked webhook
-  fails identically to success. Capture the status instead and assert on it:
+- **Always add an `env -i PATH=/usr/bin:/bin HOME=$HOME` case.** Cron's PATH omits `/usr/local/bin`, and that presents as exit 127 *before* any logic runs. A suite that only runs under your interactive shell cannot see it.
+- **Test the state-file upgrade path.** Changing a marker format (bare `touch` to structured) must be exercised against the OLD format, or the first deploy inherits broken behaviour during a live incident.
+- **`curl ... || true` is untestable by construction and unsafe in production**: a revoked webhook fails identically to success. Capture the status instead and assert on it:
   `code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 ...)`.
 
 ## Making Node.js Servers Testable
@@ -181,7 +171,7 @@ export default defineConfig({
 });
 ```
 
-**Why it matters:** Without this, CI stays red indefinitely even though the test logic is correct; the failure is at the import layer, not test execution. One project's CI sat red for over two weeks for exactly this reason.
+**Why it matters:** Without this, CI stays red indefinitely even though the test logic is correct; the failure is at the import layer, not test execution. A repo's CI once stayed red for over two weeks for exactly this reason.
 
 ### Factory Pattern for Dependency Injection
 
@@ -226,7 +216,7 @@ pytest --cov=src            # check coverage
 
 ## CI Test Workflow
 
-Use a standard `.github/workflows/test.yml` that runs tests on every push and PR to the default branch.
+A standard `.github/workflows/test.yml` that runs tests on every push and PR to the default branch.
 
 **Standard template (Node.js):**
 ```yaml
@@ -252,7 +242,7 @@ jobs:
 **Python repos** use a similar pattern with `setup-python@v5`, `pip install`, and `pytest`.
 
 **Key rules:**
-- Pin Node.js to the current LTS (22). Node 20 reached EOL on April 30, 2026; repos still using Node 20 in CI should migrate. Don't use `node-version: 'lts/*'` as it can shift unexpectedly.
+- Pin Node.js to the current LTS (22). Node 20 reached EOL on April 30, 2026; repos still on Node 20 in CI should migrate. Don't use `node-version: 'lts/*'` as it can shift unexpectedly.
 - Name the file `test.yml`, not `ci.yml`.
 - Branch trigger must match the repo's actual default branch (`main` vs `master`).
 - When adding first tests to a repo, also add the CI workflow so tests run on every PR.
@@ -322,13 +312,13 @@ Only proceed here if the failure audit shows incidents that ONLY a real browser 
 - Maximum 5-8 scenarios. Start by reproducing a specific past incident, not writing speculative tests
 - Dedicated test account with stable credentials, managed via secrets
 - Run against staging only, never production
-- Each test owns its state: setup creates what it needs, teardown removes it
+- Each test owns its state; setup creates what it needs, teardown removes it
 - Assert on intercepted API responses, not just DOM elements
 - Capture screenshots, network logs, and console errors on failure
 
 **Flakiness policy:** Quarantine on the second consecutive flake. Move to a non-blocking suite until fixed. A flaky test the team ignores is worse than no test.
 
-**Tag every test** by the failure mode it guards against (`@auth-flow`, `@regression-INCIDENT-42`).
+**Tag every test** by the failure mode it guards against (`@auth-flow`, `@regression-<incident-id>`).
 
 ## Mock Fidelity
 
@@ -337,7 +327,7 @@ Mocks that diverge from production are worse than no mocks; they give false conf
 - **Record real responses** from staging/production as mock fixtures. Re-record periodically
 - **Validate mock shape** against the real API schema on every CI run
 - **Never hand-write mock data** for external APIs; use recorded fixtures
-- **If a mock test passes but the feature is broken in prod**, the mock is the bug: fix the mock, not the test
+- **If a mock test passes but the feature is broken in prod**, the mock is the bug; fix the mock, not the test
 
 ## Cross-Layer Invariant Tests
 
@@ -349,29 +339,29 @@ An invariant is a property that must hold for the system to work, even though no
 
 | Invariant | Producer | Consumer | What Breaks |
 |-----------|----------|----------|-------------|
-| Locations must have lat/lng | Pipeline creates locations | Route planner filters by `withCoords` | Pipeline creates locations without coords → route planner returns 0 plans |
-| Price records must include unit | Pipeline ingests prices | UI formats as `$2.99/lb` | Missing unit → UI shows `$2.99` with no context |
-| List items serialize to JSON | Frontend `setItems()` | Backend PATCH `/api/lists/:id` | Shape mismatch → silent data loss on save |
-| API response includes source name | Backend joins tables | Frontend sparkline display | Missing join → UI shows price with no attribution |
+| Locations must have lat/lng | Pipeline creates locations | Planner filters by `withCoords` | Pipeline creates rows without coords, planner returns 0 results |
+| Price records must include unit | Pipeline ingests prices | UI formats as `$2.99/lb` | Missing unit, UI shows `$2.99` with no context |
+| List items serialize to JSON | Frontend `setItems()` | Backend PATCH `/api/lists/:id` | Shape mismatch, silent data loss on save |
+| API response includes source name | Backend joins tables | Frontend sparkline display | Missing join, UI shows a value with no attribution |
 
 ### When to Write Invariant Tests
 
 Write an invariant test whenever:
 1. **You just fixed a cross-layer bug.** The fix goes in the code; the invariant test goes in the test suite. This is the regression test for the *class of bug*, not just the specific instance.
-2. **One system produces data another consumes.** Pipeline → database → API → UI. Each boundary is an invariant.
+2. **One system produces data another consumes.** Pipeline to database to API to UI. Each boundary is an invariant.
 3. **A filter or query depends on data shape.** If `WHERE lat IS NOT NULL` is used anywhere, test that the data producer always sets lat.
 4. **Display formatting depends on API response shape.** If the UI expects `sourceName` in the response, test that the API actually returns it.
 
 ### How to Write Them
 
-Invariant tests don't need a database. Test the **contract**, the shape and constraints of data flowing between layers:
+Invariant tests don't need a database. Test the **contract**: the shape and constraints of data flowing between layers:
 
 ```typescript
-describe("Pipeline → Route Planner invariant", () => {
+describe("Pipeline → Planner invariant", () => {
   it("pipeline-created locations must have coordinates", () => {
     // This is the shape the pipeline produces
     const loc = createPipelineLocation("acme", "94102");
-    // This is the filter the route planner applies
+    // This is the filter the planner applies
     const visible = [loc].filter(s => s.lat != null && s.lng != null);
     expect(visible).toHaveLength(1); // Would have caught the bug
   });
@@ -389,9 +379,9 @@ describe("API → UI invariant", () => {
 ### Naming Convention
 
 Name invariant tests after the boundary they guard:
-- `pipeline-locations.test.ts` — pipeline → database shape
-- `price-display.test.ts` — API response → UI formatting
-- `route-planner.test.ts` — database query assumptions
+- `pipeline-locations.test.ts` — pipeline to database shape
+- `price-display.test.ts` — API response to UI formatting
+- `planner.test.ts` — database query assumptions
 
 ### Common Patterns Across Projects
 
@@ -406,7 +396,7 @@ These invariants recur in every full-stack project:
 
 ## Zod Validation in API Routes
 
-Every Next.js API route that parses input with Zod **must** catch `ZodError` and return a 400 response. Without this, Zod validation failures bubble up as unhandled exceptions → 500 Internal Server Error, which hides the real problem from the client.
+Every Next.js API route that parses input with Zod **must** catch `ZodError` and return a 400 response. Without this, Zod validation failures bubble up as unhandled exceptions to a 500 Internal Server Error, which hides the real problem from the client.
 
 ```typescript
 import { ZodError } from "zod";
@@ -429,21 +419,25 @@ try {
 
 ## Live Browser Testing
 
-For testing web apps in a real browser during development, prefer driving a real browser session over headless-only tooling when the goal is to see what a user actually sees: real cookies, real session, real extensions.
+For testing web apps in a real browser during development, prefer a driver that runs in your actual browser session (real cookies, real extensions, real rendering) when you need to see what the user sees. Headless Playwright/Puppeteer is the portable default for CI and for reproducible scripted runs.
 
-**When to use:** Integration testing, debugging UI issues, verifying deployed changes, form fill testing, or any scenario where the rendered result matters more than the DOM assertion.
+Typical loop, whatever the driver:
 
-A minimal command vocabulary for any such harness:
 ```bash
-tabs                            # check a tab is connected
-navigate "http://localhost:3000"
-state                           # read page: buttons, inputs, errors
-click "Submit"                  # interact
-assert-text "Success"           # verify
-console                         # check for errors
+# check a tab/context is connected
+# navigate to the target URL
+# read page state: buttons, inputs, visible errors
+# interact: click, fill, submit
+# assert on visible text
+# check the console for errors
 ```
 
-**Key detail:** Keep commands synchronous (send + block for result) so a test reads top to bottom without sleep-and-hope.
+Headless Chrome is usually available locally and is enough for a visual check:
+
+```bash
+google-chrome --headless --disable-gpu --no-sandbox \
+  --screenshot=out.png "file://$PWD/page.html"
+```
 
 ## Don't Grep Test Output to Detect Pass/Fail
 
@@ -463,13 +457,11 @@ if [ "$TEST_EXIT" -ne 0 ]; then
 fi
 ```
 
-**Why:** a verification script once grepped test output for "FAIL" to detect failures. A refactor added error-handling tests with names containing "error", causing every subsequent verification run to false-positive as a build failure regardless of actual test results.
+**Why:** a verification script that grepped test output for "FAIL" started false-positiving as a build failure after a refactor added error-handling tests with names containing "error". Every subsequent run reported a failure regardless of the actual result.
 
 **Exception:** You can still grep output for metadata extraction (e.g., `grep -oP '\d+ passed'` to surface a human-friendly count in a log line), but never use output grep as the pass/fail gate.
 
 ## CI Workflow Gotchas
-
-Two patterns cause repeated CI failures:
 
 ### Test Glob Quoting on GitHub Actions
 
@@ -497,11 +489,8 @@ GitHub Actions `cache: npm` with `npm ci` requires `package-lock.json` in the re
 
 If a module (e.g., `db.ts`, `prisma.ts`) runs `new PrismaClient()` or reads a required env var **at module load time**, any test file that imports it will crash the entire vitest runner before any test executes. CI shows a cryptic initialization error rather than a test failure, and the repo CI can stay red for weeks with no obvious cause.
 
-**Example:** a test file imports `db.ts`; `db.ts` calls `new PrismaClient()` at the top level; Prisma throws when `DATABASE_URL` is unset.
-
 **Fix:** Set a dummy value in `vitest.config.ts`:
 ```typescript
-// vitest.config.ts
 export default defineConfig({
   test: {
     env: {
@@ -549,7 +538,7 @@ it('returns focus to trigger on Escape', async () => {
 });
 ```
 
-**Why:** An image lightbox component left focus on `document.body` after every close, silently breaking keyboard traversal of all surrounding cards. The bug went unnoticed until explicit close-path tests were written; none of the visual tests caught it.
+**Why:** An image lightbox left focus on `document.body` after every close, silently breaking keyboard traversal of all surrounding cards. The bug went unnoticed until explicit close-path tests were written; none of the visual tests caught it.
 
 ## Boundary Validation: Non-Negative Quantities from External Sources
 
@@ -569,11 +558,11 @@ function computePace(distanceM, durationSec) {
 }
 ```
 
-**Self-review trigger:** Any numeric guard for a measured/physical quantity (distance, duration, speed, count, price) that comes from an external source: use `<= 0`, not `!x`/`=== 0`. Check that all adapters for the same domain use consistent guard forms.
+**Self-review trigger:** Any numeric guard for a measured/physical quantity (distance, duration, speed, count, price) that comes from an external source; use `<= 0`, not `!x`/`=== 0`. Check that all adapters for the same domain use consistent guard forms.
 
-**Test to write:** `expect(fn(1000, -100)).toBeUndefined()` — verify the negative case explicitly alongside the zero case.
+**Test to write:** `expect(fn(1000, -100)).toBeUndefined()`; verify the negative case explicitly alongside the zero case.
 
-**Why:** a pace helper returned `-12.5` for `computePace(8000, -100)` because the guard `!durationSec || durationSec === 0` passed the negative through. A malformed webhook payload could reach this path. A sibling adapter in the same file used `speed <= 0` correctly; the inconsistency between two adapters doing the same job was the tell.
+**Why:** a pace helper returned `-12.5` for `computePace(8000, -100)` because the guard `!durationSec || durationSec === 0` passed the negative through, and a malformed webhook payload could reach that path. A sibling adapter in the same file used `speed <= 0` correctly; the inconsistency between two siblings was the tell.
 
 ## Batch Loop Resilience: Isolate Per-Item Failures
 
@@ -611,9 +600,9 @@ function detectAll(items, templates) {
 }
 ```
 
-**Self-review trigger:** Any `new RegExp(non-literal)`, `JSON.parse(file/network)`, or division by a data-derived value inside a loop → ask "does one bad input abort the whole batch?" Also: compile invariant regexes once before the loop, not per-iteration.
+**Self-review trigger:** Any `new RegExp(non-literal)`, `JSON.parse(file/network)`, or division by a data-derived value inside a loop; ask "does one bad input abort the whole batch?" Also: compile invariant regexes once before the loop, not per-iteration.
 
-**Why:** an auto-detection endpoint compiled `new RegExp(template.pattern)` from stored template strings inside a loop with no guard. One malformed pattern threw SyntaxError and 500'd the endpoint for ALL records. The same shape recurs with `JSON.parse` on metadata files and interpolation with zero-divisor timestamps.
+**Why:** a detection endpoint compiled `new RegExp(template.pattern)` from stored template strings inside a loop with no guard. One malformed pattern threw SyntaxError and 500'd the endpoint for ALL records. Same shape recurs with `JSON.parse` on metadata files and interpolation with zero-divisor timestamps.
 
 ## What NOT to Build
 
@@ -621,11 +610,11 @@ function detectAll(items, templates) {
 - More than 8-10 browser test scenarios (you're compensating for missing integration tests; push coverage down the pyramid)
 - Tests without a corresponding past incident (speculative tests have low ROI and high maintenance cost)
 
-## Test a Statistic at Both Sample Parities or an Even-Length Median Bug Survives
+## Test a Statistic at Both Sample Parities
 
 A digest scanner computed a median as `sorted[Math.floor(len / 2)]` at five call sites. That is correct only for ODD-length samples; on an even-length sample it returns the upper-middle element instead of averaging the two middles, so the reported median is systematically **>= the true median and never below it**. Measured over 20k simulated pools: 41% of samples wrong, mean overstatement +0.54%, worst +3.42%, zero understatements.
 
-**Why the existing tests did not catch it, two distinct failures, both worth copying into your own review:**
+**Why the existing tests did not catch it, two distinct failures:**
 
 1. **Every test used an odd-length sample** (5 values), the exact case where the buggy and correct expressions agree. The parity of a sample is part of a statistic's input space, just like empty / single / unsorted. If you only test odd, an even-length off-by-one is invisible.
 
@@ -644,37 +633,37 @@ A digest scanner computed a median as `sorted[Math.floor(len / 2)]` at five call
 
 Before sharing a module across sibling apps built from the same template, run it over the sibling's OWN stored production rows and read the diff by hand. "Same defect" does not mean "same data shape."
 
-A preamble-stripping module was verified against one app's full corpus (118 documents, 104 split, 0 content lost) and both siblings had the identical defect, so a verbatim copy looked obvious. Measured against their corpora it would have been actively harmful twice over. Recall: the original's pattern list split only 20 of the sibling's 46 documents, because phrasings like "Here's the rundown" were never in the original's wording. Precision, the worse half: the original's preamble is pure editor monologue so peeling everything above the first heading is safe there, but the sibling mixes narration and real content in ONE paragraph, and the same peel buried a permanent-closure notice, the current time, stated assumptions, and a top-line recommendation.
+Porting a text-preamble stripper between two sibling apps: the module was verified against the first app's full corpus (118 documents, 104 split, 0 content lost) and both siblings had the identical defect, so a verbatim copy looked obvious. Measured against the sibling's corpus it would have been actively harmful twice over. Recall: the first app's pattern list split only 20 of the sibling's 46 documents, because the sibling's wording differed. Precision, the worse half: the first app's preamble is pure editor monologue so peeling everything above the first heading is safe there, but the sibling mixes narration and real content in ONE paragraph, and the same peel buried a permanent-closure notice, the current time, stated assumptions, and a top-line recommendation.
 
 - **Audit precision, not just recall.** Recall is easy to eyeball ("did it fire?"). Precision means reading what got REMOVED. Here the split-rate went up while the output got worse.
-- **Change the shared module and re-verify the original to parity**, rather than forking it per app. The original was held to byte-identical output, proven by rendering all 61 shareable production documents on the old and new builds and diffing them (61/61 identical).
+- **Change the shared module and re-verify the original to parity**, rather than forking it per app. The first app was held to byte-identical output, proven by rendering all 61 shareable production documents on the old and new builds and diffing them (61/61 identical).
 - **A guard that hides rather than deletes still needs this scrutiny.** "Nothing is discarded, it just moves to a collapsed disclosure" is what made the coarse version feel safe, and is exactly why the damage would have been invisible: the page still renders, the tests still pass, nothing logs an error.
 
 ## A Hand-Built Fixture Never Tests the Loader
 
 When a config file gains a field, add at least one test that goes through the **real loader**: write a temp config, load it, assert the consumer sees the value. Testing the consumer with a hand-built object leaves the plumbing completely uncovered.
 
-A billing config file gained a top-level `upgradePlan`. `validatePlans()` destructured it, validated it, then returned `{plans, defaultPlan}` **without it**. Every consumer therefore saw `undefined` and no upgrade button rendered anywhere in production. All four unit tests for the feature were green throughout, because each constructed the catalog object literally and handed it to the pure resolver, so nothing ever called the loader. The defect lived exactly in the seam the tests skipped, and it was found by curling the live endpoint after deploying.
+A billing config gained a top-level `upgradePlan`. `validatePlans()` destructured it, validated it, then returned `{plans, defaultPlan}` **without it**. Every app therefore saw `undefined` and no upgrade button rendered anywhere in production. All four unit tests for the feature were green throughout, because each constructed the catalog object literally and handed it to the pure resolver, so nothing ever called the loader. The defect lived exactly in the seam the tests skipped, and it was found by curling the live endpoint after deploying.
 
 This generalises to any parse/validate/transform layer. A dropped field is invisible to both the unit suite (which never runs the transform) and the type checker (the object is still structurally valid, just missing an optional property). At least one test must cross the boundary.
 
 ## A Measurement Rig Fails the Same Ways the Thing It Measures Does
 
-Two failure modes, both in the rig rather than the subject.
+Check the rig is measurable BY CONSTRUCTION before collecting.
 
-1. **UNMEASURABLE BY CONSTRUCTION.** Candidates were selected for "never read in thousands of sessions", then the metric was "recall on reads". Expected observations in the two-week window: 0.00. Two weeks of empty logs would have read as "the retriever is safe" when all it proves is that you picked entries nothing reads. Before collecting, compute the EXPECTED number of observations under the null. If it rounds to zero, the metric is decoration.
+1. **UNMEASURABLE BY CONSTRUCTION.** Candidates were selected for "never read in 4,225 sessions", then the metric was "recall on reads". Expected observations in the 14-day window: 0.00. Two weeks of empty logs would have read as "the retriever is safe" when all it proves is that you picked entries nothing reads. Before collecting, compute the EXPECTED number of observations under the null. If it rounds to zero, the metric is decoration.
 
-2. **THE RIG IS A SYSTEM TOO.** Mid-audit a second demand signal appeared to justify cutting the candidate set, and the cut was applied before running a control. The control killed it: 91 of 99 matching blocks were inside tool results, i.e. a read file's own `[[wikilinks]]` echoed back in a staleness notice. It was a correlation with the measurement's own reads.
+2. **THE RIG IS A SYSTEM TOO.** Mid-audit, a second demand signal seemed to justify cutting the candidate set, and the cut was applied before running a control. The control killed it: 91 of 99 matching blocks were inside tool results, i.e. a read file's own links echoed back in a staleness notice. It was a correlation with the measurer's own reads.
 
-**CONSEQUENCE: version-stamp the rig.** Hash the matcher source + input sets + thresholds into every record, and make the scorer REFUSE to average across versions rather than silently mixing them. Without this, a rig that changed four times in one day produced a "0% recall" artifact, while the then-current matcher fired correctly on the exact prompt it was scored as missing.
+3. **VERSION-STAMP THE RIG.** Hash the matcher source + input sets + thresholds into every record, and make the scorer REFUSE to average across versions rather than silently mixing them. Without this, a rig that changed 4x in one day produced a "0% recall" artifact while the then-current matcher fired correctly on the exact prompt it was scored as missing.
 
-**PROPORTIONALITY:** stop when rig effort exceeds the prize. Somewhere around the third rig correction, "let it collect and read it once" beats a fifth fix.
+4. **PROPORTIONALITY: stop when rig effort exceeds the prize.** Somewhere around the third rig correction, "let it collect and read it once" beats a fifth fix.
 
 ## A Metadata-Only Log Is Still Replayable: Rejoin It to the Transcripts
 
 A shadow/telemetry log that deliberately omits sensitive fields looks untestable, and "I can't regression-test this until it collects the real thing" feels forced. Usually it is wrong: **the omitted field is often still sitting in a second store that kept it for an unrelated reason.**
 
-Concrete case. A shadow log recorded, per prompt, which memories a matcher would have surfaced plus the prompt's **length**, never its text, by design, so the log carried nothing sensitive. That is exactly the field a replay needs. But the text was still in the session transcripts on disk, so the records rejoin on:
+Concrete case. A shadow log recorded, per prompt, which memories a matcher would have surfaced plus the prompt's **length**, never its text, by design, so the log carries nothing sensitive. That is exactly the field a replay needs. But the text was still in the session transcripts on disk, so the records rejoin on:
 
 ```
 (session_id, |timestamp delta| <= 5s, exact character length)
@@ -684,35 +673,32 @@ That turned "wait 12 more days" into a 148-case regression test available the sa
 
 Three rules that generalise:
 
-- **Filter user-role entries down to real prompts.** Tool results arrive with the same role. A long tool output can coincidentally match a prompt's length and replay the wrong text into a test that then passes. Drop any content list containing a tool-result block; concatenate only text blocks.
+- **Filter `type:"user"` entries down to real prompts.** Tool results arrive as `type:"user"` too. A long tool output can coincidentally match a prompt's length and replay the wrong text into a test that then passes. Drop any content list containing a `tool_result` block; concatenate only `text` blocks.
 - **Assert on exact values, not overlap.** Compare names *and* scores in order. A near-match hides precisely the drift the test exists to catch.
-- **Report the recovery rate as part of the result.** 148 of 218 records replayed; the other 70 had no local transcript (headless sessions). Quoting "148/148 passed" without the denominator would imply coverage the test does not have. Where a transcript existed at all, recovery was 97%; that is the honest number, and it is the one that says whether the sample is worth trusting.
+- **Report the recovery rate as part of the result.** 148 of 218 records replayed; the other 70 had no local transcript. Quoting "148/148 passed" without the denominator would imply coverage the test does not have. Where a transcript existed at all, recovery was 97%; that is the honest number, and it is the one that says whether the sample is worth trusting.
 
 ## Touch Drag Needs Pointer Events, and Raw CDP Touch in Tests Does Not Auto-Scroll
 
-Two findings from building a drag-and-drop list as a static page.
-
-**Building it:** HTML5 drag-and-drop (dragstart/dragover/drop) does not fire on touch, so a page built with it is dead on a phone while testing perfectly on a desktop. Use Pointer Events (pointerdown/pointermove/pointerup with `setPointerCapture`) instead, which cover mouse, touch, and pen in one code path. Give draggable elements `touch-action: none` or the browser will start a scroll and never deliver pointermove. Always ship a non-drag fallback (tap-to-select then tap-a-target, plus keyboard keys) because drag is the least accessible interaction on the page.
+Building it: HTML5 drag-and-drop (dragstart/dragover/drop) does not fire on touch, so a page built with it is dead on a phone while testing perfectly on a desktop. Use Pointer Events (pointerdown/pointermove/pointerup with `setPointerCapture`) instead, which cover mouse, touch, and pen in one code path. Give draggable elements `touch-action: none` or the browser will start a scroll and never deliver pointermove. Always ship a non-drag fallback (tap-to-select then tap-a-target, plus keyboard keys) because drag is the least accessible interaction on the page.
 
 Also let a release over dead space fall back to the last real drop target hovered during that drag. Gutters between rows and sticky headers are not drop zones, so a release there silently reverts the drag and reads as a broken page.
 
-**Testing it:** Playwright's `.tap()` and `.click()` auto-scroll the target into view, but raw CDP `Input.dispatchTouchEvent` does not. If either end of a simulated touch drag sits below the fold, the touch lands on nothing and the assertion fails for a reason that has nothing to do with the code. Scroll both ends into the viewport first and assert they are on screen before dispatching, so a layout change fails loudly instead of masquerading as a drag bug. Note that CDP `touchEnd` takes an empty `touchPoints` array; the coordinates come from the preceding `touchMove`.
+Testing it: Playwright's `.tap()` and `.click()` auto-scroll the target into view, but raw CDP `Input.dispatchTouchEvent` does not. If either end of a simulated touch drag sits below the fold, the touch lands on nothing and the assertion fails for a reason that has nothing to do with the code. Scroll both ends into the viewport first and assert they are on screen before dispatching, so a layout change fails loudly instead of masquerading as a drag bug. Note that CDP `touchEnd` takes an empty `touchPoints` array; the coordinates come from the preceding `touchMove`.
 
 ## A Generated Page Passing `node --check` Proves Nothing About Whether the Chart Is Readable
 
 Three real defects shipped past every automated check on a generated chart page: a colour ramp whose every data value landed in one half of the scale (scale was zero-based, data started at 40% of range), an axis label blind-truncated from "Summer (May to Sep)" to "Sum", and a 20-bar ranking chart whose bars spanned 1.2 percentage points and were visually identical. All three were found in the first 30 seconds of looking at a screenshot.
 
-Screenshot it and look:
-
 ```bash
-google-chrome --headless --disable-gpu --no-sandbox --screenshot=out.png file://$PWD/page.html
+google-chrome --headless --disable-gpu --no-sandbox \
+  --screenshot=out.png "file://$PWD/page.html"
 ```
 
 Then crop with PIL and read the PNG.
 
-Related trap: a guarded try/except import (a data module importing a report config) silently swallows config errors, so the build exits 0 having skipped the new page entirely. Always confirm the build output literally names your file.
+Related trap: a guarded try/except import silently swallows config errors, so the build exits 0 having skipped the new page entirely. Always confirm the build output literally names your file.
 
-## A Bare URL in Body Text Overflows the Document Without Any Bounding Box Reporting It
+## A Bare URL in Body Text Overflows Without Any Bounding Box Reporting It
 
 Symptom: at a 390px viewport, `documentElement.scrollWidth` was 638. The usual sweep (walk every element, flag any whose `getBoundingClientRect().right` exceeds `clientWidth`) returned an EMPTY list, because the overflowing content is inline text inside a normally-sized block, not an oversized box.
 
@@ -724,13 +710,13 @@ document.querySelectorAll('*').forEach(el => {
 });
 ```
 
-That walks the chain straight to the culprit (here a CMS excerpt containing a bare `https://` URL with no break opportunity). Fix is `overflow-wrap: anywhere` on the text blocks, not a width or overflow change on the container.
+That walks the chain straight to the culprit (an excerpt containing a bare `https://` URL with no break opportunity). Fix is `overflow-wrap: anywhere` on the text blocks, not a width or overflow change on the container.
 
 Two follow-ons that are easy to miss:
 - Re-test AFTER any client-side re-render. If JS rebuilds the same markup from an API (a live-refresh path), a fix applied only to the server-rendered template leaves the JS-rendered copy broken.
 - Verbatim third-party text (CMS excerpts, user content, API descriptions) is where this comes from. Any surface rendering text you did not write needs the wrap rule by default.
 
-## Test the Whole Field Set a Boundary Forwards, Not Just the Fields It Happens to Implement
+## Test the Whole Field Set a Boundary Forwards
 
 A config/YAML loader built a physics model from two of its five tunable fields:
 
@@ -753,11 +739,11 @@ This also makes "omitted key defers to the model" a testable contract (`parsed_w
 
 Third: coerce at the boundary. The un-coerced path let a quoted config value survive as a `str` into the model, where it failed much later and far from its cause inside a numpy clip call. `float()` at parse time, raising an error that names the entity and the field, turns a baffling downstream type error into a message pointing at the config line.
 
-## A Response That Narrates the Work Is Not the Work: Guard Output SHAPE, Not Just Error Strings
+## A Response That Narrates the Work Is Not the Work: Guard Output SHAPE
 
 A research call spent its turns working, then emitted a final turn that only reported on itself: "All eight background research agents have now completed. The full guide was delivered above, no updates needed." That 380-char status report was stored as a COMPLETED answer under a green badge. There was no "above" (each follow-up is a separate call whose only output is that text) and the recommendation it named appears nowhere in the 27KB document it pointed at, which is exactly what the user reported missing.
 
-Why every existing guard missed it, and the general lesson:
+Why every existing guard missed it:
 
 1. Guards were all keyed to ERROR STRINGS (`API Error:`, auth failures, usage limits) or to EMPTINESS. This output was neither: it was well-formed, confident, on-topic prose of normal-looking length. The failure mode is output that is structurally fine and semantically absent. Add a guard on the SHAPE of a valid answer, not only on the shapes of known failures.
 
@@ -765,13 +751,13 @@ Why every existing guard missed it, and the general lesson:
 
 3. A false positive on this kind of guard DELETES a real answer, so it needs several independent conditions rather than one heuristic. The shipped version requires all three: short residual after narration-stripping, a match on a process-narration or deferral wording FAMILY, and the absence of any substantive marker (link, price, list, heading, table). The substantive-marker test is what protects a legitimately terse answer.
 
-4. Measure before believing the guard works. Running it over all 266 stored responses across three apps flagged exactly 1, the reported row, while 21 of the 22 other short candidates correctly passed. The same pass surfaced a second, much larger defect that no one had noticed: the narration stripper was wired only to the main response and never to follow-up answers, so 83% of one app's follow-ups had been rendering the model's monologue AS the answer since the feature shipped. A corpus sweep finds the bug you were not looking for.
+4. **Measure before believing the guard works.** Running it over all 266 stored responses across three apps flagged exactly 1, the reported row, while 21 of the 22 other short candidates correctly passed. The same pass surfaced a second, much larger defect nobody had noticed: the narration stripper was wired only to the main response and never to follow-up answers, so 30 of 36 follow-ups (83%) in one app had been rendering the model's monologue AS the answer since the feature shipped. A corpus sweep finds the bug you were not looking for.
 
-Second, separate learning: a committed prompt change that requires a container rebuild is INERT until that rebuild runs. A fix was committed hours after the running container was built; grepping the live container's system prompt for the new rules returned 0 occurrences of all four distinctive strings. `git log` said shipped, the artifact said otherwise. Verify the ARTIFACT, not the commit.
+Separate learning from the same session: **a committed prompt change that requires a container rebuild is INERT until that rebuild runs.** A fix was committed at 18:14; the running container was built 14 hours earlier, and grepping the live container's system prompt for the new rules returned 0 occurrences of all four distinctive strings. `git log` said shipped, the artifact said otherwise. Verify the ARTIFACT, not the commit.
 
 ## Ordering Tests Must Assert the Exact Sequence, Not Set Completeness
 
-When fixing a non-total `ORDER BY` (a sort key with ties and no unique tiebreaker), the obvious test, "page 1 union page 2 covers all N rows exactly once", PASSES on the unfixed code and ships as fake coverage. Under a single stable query plan the pages are always complete; rows are only dropped/duplicated when the plan CHANGES between the two page requests (a migration adding an index, ANALYZE, VACUUM, a version bump). Measured on SQLite: same SQL, 25 tied rows, table-scan plan returns the tie group ascending by rowid and an ASC composite index returns it descending; serve page 1 under one and page 2 under the other and 5 of 25 become unreachable while 5 repeat.
+When fixing a non-total `ORDER BY` (a sort key with ties and no unique tiebreaker), the obvious test ("page 1 union page 2 covers all N rows exactly once") PASSES on the unfixed code and ships as fake coverage. Under a single stable query plan the pages are always complete; rows are only dropped/duplicated when the plan CHANGES between the two page requests (a migration adding an index, ANALYZE, VACUUM, a version bump). Measured on SQLite: same SQL, 25 tied rows, table-scan plan returns the tie group ascending by rowid and an ASC composite index returns it descending; serve page 1 under one and page 2 under the other and 5 of 25 become unreachable while 5 repeat.
 
 Two ways to make the test discriminate:
 1. Assert the EXACT returned sequence against the intended total order, with fixture ids chosen so the pre-fix order (insertion/rowid) provably differs from the post-fix order (e.g. insert in ascending id order, assert descending).
@@ -781,17 +767,17 @@ Related blindness in the audit itself: a sweep for "every ORDER BY that needs a 
 
 Same family as: asserting a field is PRESENT is not asserting it is CORRECT.
 
-## Re-Deriving a Metric Breaks Every Site That DIFFERENCES It Against a Source Still Computed the Old Way
+## Re-Deriving a Metric Breaks Every Site That DIFFERENCES It Against a Source Computed the Old Way
 
-Switching a cadence metric to a moving average (excluding a provider's stopped-sample 0 sentinel) correctly fixed one finding but silently broke a page's "delta vs. a compare record". That delta diffs the current record against a compare record whose streams are never loaded, so after the change the primary resolved cadence from the stream while the compare resolved it from the diluted provider summary. The delta then reported a difference in METHODOLOGY (a spurious 8 points on any sample crossing a gate) rather than a difference between the two records.
+Switching a cadence metric to a moving average (excluding a stopped-sample 0 sentinel) correctly fixed the primary finding, but silently broke a page's "Form Score Delta". That delta diffs the current record against a compare record whose streams are never loaded, so after the change the primary resolved cadence from the stream while the compare resolved it from the diluted provider summary. The delta then reported a difference in METHODOLOGY (a spurious 8 points on any item crossing a threshold gate) rather than a difference between the two records.
 
-The failure mode: a same-file unit test cannot catch it, because both sides of the subtraction are individually correct. Before changing how a metric is derived, grep every consumer and ask which of them SUBTRACT, COMPARE, RANK, or THRESHOLD that metric against a value computed the old way, including a second call to the same function with different arguments (here `evaluate(record, streams)` vs `evaluate(compare, undefined)`). Deltas, sparklines, "vs last week", leaderboards and regression baselines are all this shape.
+The failure mode: a same-file unit test cannot catch it, because both sides of the subtraction are individually correct. Before changing how a metric is derived, grep every consumer and ask which of them SUBTRACT, COMPARE, RANK, or THRESHOLD that metric against a value computed the old way, including a second call to the same function with different arguments (here, `evaluate(item, streams)` vs `evaluate(compare, undefined)`). Deltas, sparklines, "vs last week", leaderboards and regression baselines are all this shape.
 
-Related: the same investigation showed that reporting a range from a convenience sample is a distinct trap. 8 of 43 records gave a zero-fraction range of 0.7-7.2%, while the full 43 gave 0.36-53.96% (max understated 7.5x). Sample the population before quoting its bounds.
+Related: the same run showed that reporting a range from a convenience sample is a distinct trap. 8 of 43 records gave a zero-fraction range of 0.7-7.2%, while the full 43 gave 0.36-53.96% (max understated 7.5x). Sample the population before quoting its bounds.
 
 ## A Push Gate Flagging a Dirty File During a Live Verifier Run May Be Flagging the UNFIXED Source
 
-A push gate fired mid-session listing a worktree source file as uncommitted. That file was a verifier subagent's in-flight discrimination revert (`git show origin/main:<file> > <file>`), i.e. the UNFIXED source. Obeying the gate by committing would have shipped the bug the change was fixing.
+A push gate fired mid-session listing a worktree file as uncommitted. That file was a verifier subagent's in-flight discrimination revert (`git show origin/main:<file> > <file>`), i.e. the UNFIXED source. Obeying the gate by committing would have shipped the bug the change was fixing.
 
 Before obeying any push gate while a verifier or discrimination check is running, diff the working tree against the commit:
 
@@ -803,19 +789,19 @@ If HEAD has the fix and the working tree does not, the dirty state is the checke
 
 Related reporting rule: added test count is NOT the net suite delta. 10 new `it()` blocks with 2 pre-existing ones rewritten in place is net +8. Claiming "7 of the 8 new tests fail, the 3 that pass are guards" is arithmetically impossible. State added-vs-net separately.
 
-## A Server-Rendered Default Is Invisible to JS-Rendered Markup
+## A Server-Side Default Is Invisible to JS-Rendered Markup
 
 A template can define a default (a tagline, a label, any copy) and expose it through a server-side accessor, and that default will be correct everywhere the server prints. It will still come out blank wherever the markup is filled in by JavaScript, because the JS reads the JSON payload the server printed, and the payload was built from the raw stored value before the accessor ever ran.
 
-Caught while exporting a set of themes: three of the designs paint their tagline from a global JS data object, the server accessor fell back to the constant correctly, and the rendered page showed an empty line. A `curl` of the front page passed (HTTP 200, markup present); only a browser that ran the script saw the blank.
+Caught while exporting a batch of themes: three of the designs paint their tagline from a global JS data object, the server-side accessor fell back to the constant correctly, and the rendered page showed an empty line. `curl` of the front page passed (HTTP 200, markup present); only a browser that ran the script saw the blank.
 
 The fix is to normalise the payload, not the accessor: apply defaults where the data array is assembled, so server and client read the same value by construction. The general rule: when the same value has two readers, put the fallback upstream of both, and test the reader that a `curl` cannot see.
 
-## Test Design Variants Against Per-Variant Expectations, Not One Generic Assertion
+## Test Design Variants Against Per-Variant Expectations
 
 When a deliverable is N variations of the same thing, a single shared assertion is the wrong test. It either fails variants that are behaving correctly or is weakened until it catches nothing.
 
-A browser smoke test over eighteen themes reported 14/18 with one generic check (a filter row exists, images are decoded, clicking a card shows a title). All four failures were the test being wrong: one design is a text index that shows no images until hover and deliberately hides the detail header, one is a long scroll with no overlay at all, and three name their filter row something other than `#filters`. Relaxing the assertion until all eighteen passed would have removed its ability to detect a real break.
+A browser smoke test over eighteen portfolio themes reported 14/18 with one generic check (a filter row exists, images are decoded, clicking a card shows a title). All four failures were the test being wrong: one design is a text index that shows no images until hover and deliberately hides the detail header, one is a long scroll with no overlay at all, and three name their filter row something other than `#filters`. Relaxing the assertion until all eighteen passed would have removed its ability to detect a real break.
 
 The fix is a declared expectation per variant (what to click, what must then be visible, how many images are due on load) so each is checked against what it actually is. The table doubles as documentation of how the variants differ. Reading the variant source to build that table is also what proves a "failure" is a design choice rather than a bug.
 
@@ -833,7 +819,7 @@ When a taxonomy list feeds both a filter bar and something structural (section h
 
 Emit two lists instead: the visible list the selection bar draws, and the full list everything structural reads. Then assert per consumer, in a browser, that hiding a term changes the bar and nothing else: same item count on the page, same number of sections, same number of segments, and reversible.
 
-Seen in a multi-design export: 18 designs share one payload, 16 only draw the row, but one groups items under headings and another sizes a proportion strip from the counts. Filtering the single list would have made a hidden term take its items off the page in those two. Fix was emitting both `cats` and `catsAll` in the payload, build-time patches with assertions on the two affected variants, and a feature test checking all 18.
+Seen in a multi-design export: 18 designs share one payload, 16 only draw the row, but one groups items under headings and another sizes a proportion strip from the counts. Filtering the single `cats` list would have made a hidden category take its items off the page in those two. Fix was `cats` plus `catsAll` in the payload, build-time patches with assertions on the two variants, and a feature test checking all 18.
 
 ## `git show ref:file > file` Truncates the Target Before git Runs
 
@@ -843,9 +829,9 @@ When reverting a single file for a discrimination check, never redirect `git sho
 git show origin/main:server/routes/feed.ts > server/routes/feed.ts   # WRONG
 ```
 
-The shell creates/truncates the redirect target BEFORE git executes. If the ref is wrong the command fails AFTER the file is already zero bytes, so the fix you were about to prove is silently destroyed and the failure message (`fatal: invalid object name`) looks like nothing happened. This is especially easy to hit because the wrong ref is usually `origin/main` on a repo whose default branch is `master` (resolve it with `gh repo view <slug> --json defaultBranchRef -q .defaultBranchRef.name`).
+The shell creates/truncates the redirect target BEFORE git executes. If the ref is wrong the command fails AFTER the file is already zero bytes, so the fix you were about to prove is silently destroyed and the failure message ("fatal: invalid object name") looks like nothing happened. This is especially easy to hit because the wrong ref is usually `origin/main` on a repo whose default branch is `master` (resolve it with `gh repo view <slug> --json defaultBranchRef -q .defaultBranchRef.name`).
 
-Safe form: stage through a temp file, and keep a backup of the fixed version first:
+Safe form: stage through a temp file, and keep a backup of the fixed version first.
 
 ```bash
 cp path/to/file /tmp/file.fixed.bak
@@ -855,3 +841,21 @@ cp /tmp/file.fixed.bak path/to/file   # restore
 ```
 
 Verify the revert actually landed with `git diff --stat <ref> -- <path>` (empty output = reverted) rather than trusting the redirect's exit code. Related: `git stash push` reverts to HEAD, not the merge base, so it stops discriminating once the fix is committed.
+
+## A Rotted LIVE Control Is Indistinguishable from a Detector Regression
+
+A validation suite pins a known-LIVE control so a detector that has started answering "dead" everywhere is caught. But the control itself expires: the pinned record is removed upstream, the CTRL-LIVE row starts failing, and the output is byte-identical to a real regression. The operator then has to guess, and the cheap guess ("the control probably rotted") is the one that hides a genuine regression. Seen in a liveness sweep: the control had rotted, the suite exited 1 with no diagnosis, and the control file had carried a header comment telling the operator to work it out by hand since the day it was written. Nobody had.
+
+The discriminator is a SECOND source that the detector does not itself consult. If the detector reads a JSON API, have the triage read the public HTML instead. Both saying dead means the record really is gone (ROTTED, repin it). The HTML still serving the item while the API says 404 means the detector broke (REGRESSION, do not touch the controls). Some sources need a different independent signal because they serve live and removed items at the same 200 URL: a real page is server-rendered (58KB) and a removed one leaves the bare SPA shell (7KB).
+
+Second failure in the same file: a CTRL-BADTOKEN row existed to prove that a wrong-but-real identifier yields a confident wrong "dead". Its target had also expired, so the row passed because the record was gone rather than because the token was wrong. It had stopped testing anything while still showing green.
+
+**How to apply:** any control whose expected verdict is the PERISHABLE one (live, present, in-stock, reachable) needs automated rot-vs-regression triage, not a comment telling a human to check. Validate the triage on its own live/dead/garbage controls before trusting it, and make the failure message name the cause and hand back a replacement. Separately, audit controls that pass: a control can go green for the wrong reason, and unlike a red one, nothing prompts anyone to look.
+
+## Playwright `allInnerTexts()` Returns Empty Strings for SVG `<text>` Nodes
+
+Asserting that a label override reached an SVG-based artifact with `locator('svg text').allInnerTexts()` reports empty strings for every node, so a passing render looks like a failure.
+
+Why: `innerText` is an `HTMLElement` property. `SVGElement` does not implement it, and Playwright's innerText helpers fall back to an empty string rather than throwing.
+
+**How to apply:** read SVG copy with `evaluateAll(els => els.map(e => e.textContent))`. Same class of false negative as an assertion mechanism failing rather than the product failing.
