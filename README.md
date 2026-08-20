@@ -49,6 +49,8 @@ bash scripts/secret-scan.sh --selftest  # proves the gate can actually fail
 
 Run `--selftest` after editing patterns. A scanner that matches nothing reports every input as clean, which is indistinguishable from a clean repo.
 
+If your repo legitimately contains something shaped like a secret (a docs example with placeholder credentials, a vendor's published example key), exempt that specific line in `.secret-scan-allow` rather than loosening a pattern. Every entry there is a hole, so keep them narrow. `--selftest` deliberately ignores the allowlist: otherwise a repo that exempted the test fixture would report a passing gate that no longer catches anything.
+
 Optionally set `OPERATOR_NAME` in your environment. The `commit-msg` gate then blocks public commit messages that quote that person issuing an instruction, which is the difference between publishing a rule and publishing who asked for it.
 
 ### Verifying it took effect

@@ -55,6 +55,15 @@ build_patterns() {
   fi
 }
 
+# A repo may legitimately contain something shaped like a secret: a docs example
+# using placeholder credentials, a vendor's published example key, this script's
+# own selftest fixture. Without an exemption path those fire on every run, and a
+# warning nobody can act on trains people to ignore the gate entirely.
+#
+# Put one regex per line in .secret-scan-allow at the repo root. A matching LINE
+# is exempt. Keep entries narrow: exempt the example, not the pattern.
+ALLOW_FILE="${ALLOW_FILE:-.secret-scan-allow}"
+
 scan_stream() {
   local pat_file hits
   pat_file="$(mktemp)"; trap 'rm -f "$pat_file"' RETURN
@@ -65,6 +74,13 @@ scan_stream() {
     return 2
   fi
   hits="$(grep -n -E -f "$pat_file" - 2>/dev/null || true)"
+  if [ -n "$hits" ] && [ -f "$ALLOW_FILE" ]; then
+    local allow
+    allow="$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$ALLOW_FILE" || true)"
+    if [ -n "$allow" ]; then
+      hits="$(printf '%s\n' "$hits" | grep -v -E -f <(printf '%s\n' "$allow") || true)"
+    fi
+  fi
   if [ -n "$hits" ]; then
     echo "BLOCKED: possible secret or private identifier:"
     # Show the line number and a truncated match, never the whole secret.
@@ -93,6 +109,13 @@ TPL
     echo "created: $IDENTIFIERS_FILE"; exit 0 ;;
   --selftest)
     # Prove the gate fails on a known-bad input before trusting it to pass.
+    #
+    # Run against the RAW pattern set, with the allowlist disabled. A repo that
+    # exempts this fixture (this repo does: it appears in .secret-scan-allow so
+    # the file you are reading does not trip its own gate) would otherwise make
+    # the selftest report that the scanner passes known-bad input, which is the
+    # exact failure the selftest exists to detect.
+    ALLOW_FILE="/nonexistent"
     if printf 'AKIAIOSFODNN7EXAMPLE\n' | scan_stream >/dev/null 2>&1; then
       echo "SELFTEST FAILED: scanner passed a known-bad input"; exit 1
     fi
