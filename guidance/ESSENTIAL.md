@@ -39,8 +39,15 @@ Before reporting any audit, grep, or scan as clean:
 2. **Assert the search space is real.** List the root, or append `|| echo NONE`, so "no matches" is distinguishable from "bad path".
 3. **Search the sink, not the transport.** Match the shape of the thing that matters (the request body, the payload, the write call), not the plumbing that happens to carry it today.
 4. **Treat a file as unaudited until it has been read.** Pattern-matching clears patterns, not files.
+5. **Use `command grep`, not `grep`**, in any sweep whose result you will report.
 
 Best fix: make the audit a test that fails, then verify it fails by breaking the thing on purpose. An audit you have never seen fail is decoration that happens to be green.
+
+**Your tools may be shadowed, and the shadow is silent.** A shell can define `grep` as a *function* that routes through a different implementation with different defaults. One common wrapper honours `.gitignore`, and a great many repos gitignore their agent-config directory, so a recursive sweep skips those files entirely and reports a clean tree it never searched. This is not hypothetical: a sweep for a deprecated URL pattern was reported as "zero remaining" twice, and a script run under plain `bash` (which does not load the shell function) immediately found twelve more files.
+
+Non-interactive contexts get the real binary: a script, an `ssh host '...'` command, a cron entry. So a script and an interactive sweep will disagree, and the script is right. Check with `type grep` whenever a result surprises you, and prefer `command <tool>` in scripts and in anything you report. The same applies to any wrapped tool: an alias, function, or shim can change what a command searches, skips, or writes without changing what you typed.
+
+**A bounded search reported as complete is the same error.** An enumeration limited to a hand-picked list of three directories reported "two affected files" on a host that had eleven, because that host kept duplicate checkouts elsewhere. Search the whole space, or state that the search was bounded.
 
 ## 3. Test Before Reporting
 
@@ -85,3 +92,23 @@ When an alert is noisy, the first question is whether it is *true*, not how to m
 - Create the resource you need if you have the credentials to create it.
 - **Read the intended state before changing a service's configuration or lifecycle.** A service being down is not automatically a bug: on-demand tooling is often configured not to restart *by design*, which is different from an always-on service that crashed. Deciding "it should auto-start" on a hunch inverts documented intent.
 - **Know your filesystem boundaries.** When two environments share files through a mount (a Linux environment under a host OS, a container and its host), applications on one side do not see edits made on the other until they are synced. Sync before asking the user to reload anything.
+
+## 9. Validate the Deliverable's Shape Before Building the Machine That Produces It
+
+Before writing the pipeline, the scheduled job, the screening gate, or the generator, state in one sentence **what the artifact is and who uses it how**. Then check that sentence against the request. Getting the machinery right around the wrong artifact costs more than building nothing, because the machinery is then what you have to unpick.
+
+The trap is that the pipeline questions are concrete and absorbing (what gets screened, what the gate blocks, how often it runs) while the artifact question is vague and easy to defer. Answering four sharp questions about the wrong deliverable feels like progress and produces confident-looking work.
+
+**Publishing anything is two separate questions, and only one of them is a security question:**
+
+1. Is it safe to release? A pattern scan answers this.
+2. **Is it usable by the person receiving it?** Nothing automated answers this. Someone has to read it and ask "could I actually follow this?"
+
+A request to "distil our learnings and publish them" was once built as an extraction pipeline producing a handful of abstract essays: correctly screened, fully automated, scheduled daily, and useless, because nobody can *use* a principle with every operational detail removed. What was wanted was the working system with the private details stripped: the rules, the hooks, the installer. The rewrite kept almost none of the original pipeline.
+
+Two checks that would have caught it, both cheap:
+
+- **Name the reader and the first thing they do.** "Someone clones this and runs the installer" is a testable shape. "A reader gains insight" is not, and a deliverable defined that way can be finished without being usable.
+- **Show the smallest real sample before scaling.** One converted file, shown early, exposes a wrong shape in a minute. Twenty files converted by a pipeline expose it only after the pipeline exists.
+
+When told the output misses the point, the fix is usually not "sanitise harder" but "ship the thing itself, minus what cannot be shared."
