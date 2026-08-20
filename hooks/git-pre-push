@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# pre-push hook: blocks sensitive identifiers in ANY repo (private ones too).
+# Private repos are scanned too (they can go public; vendored files travel).
+# Scans all commits being pushed for sensitive identifiers.
+# Catches secrets that bypassed pre-commit (amended commits, rebases, etc.)
+#
+# Install: bash hooks/install-hooks.sh
+
+set -euo pipefail
+
+# Overridable so the test suite can inject a stub scanner. A real sensitive
+# string cannot be used as a fixture here: this repo is PUBLIC, so committing
+# one would be the very thing these hooks exist to prevent.
+SCAN_SCRIPT="${SCAN_SCRIPT:-$HOME/repos/openAgentGuidance/scripts/secret-scan.sh}"
+
+if [ ! -x "$SCAN_SCRIPT" ]; then
+  echo "WARNING: security-scan.sh not found at $SCAN_SCRIPT"
+  echo "Skipping pre-push security scan. Install your private context repo to enable."
+  exit 0
+fi
+
+# Check if this repo is public on GitHub
+REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+if [ -z "$REMOTE_URL" ]; then
+  exit 0
+fi
+
+# Extract owner/repo from remote URL
+REPO_SLUG=""
+if [[ "$REMOTE_URL" =~ github\.com[:/]([^/]+/[^/.]+) ]]; then
+  REPO_SLUG="${BASH_REMATCH[1]%.git}"
+fi
+
+if [ -z "$REPO_SLUG" ]; then
+  exit 0
+fi
+
+# Determine visibility for messaging. Private repos are scanned too: they can be
+# flipped public, and a vendored file carries its identifiers into every repo
+# that vendors it.
+#
+# Visibility lookup and wording both live in the shared library so this hook and
+# git-pre-commit cannot disagree about the same repo. They previously each had
+# their own inline copy, which is exactly how this hook came to print "This is a
+# PUBLIC repo" at a private one.
+#
+# A missing library must NOT disable the scan: the identifier check below does
+# not need visibility at all, only the wording does. So degrade to UNKNOWN and
+# keep gating, rather than taking git-commit-msg's fail-open exit.
+VISIBILITY="UNKNOWN"
+LIB=""
+for cand in "$(dirname "$0")/lib/anonymity-check.sh" \
+            "$HOME/repos/openAgentGuidance/hooks/lib/anonymity-check.sh"; do
+  [ -r "$cand" ] && { LIB="$cand"; break; }
+done
+if [ -n "$LIB" ]; then
+  # shellcheck source=lib/anonymity-check.sh
+  source "$LIB"
+  VISIBILITY=$(repo_visibility .)
+else
+  echo "WARNING: anonymity-check.sh not found; scanning anyway, visibility unknown." >&2
+  visibility_notice() { echo "Could not determine visibility for ${2:-this repo}, so it is treated as public."; }
+fi
+
+# Read stdin for push info: <local ref> <local sha> <remote ref> <remote sha>
+FOUND_ISSUES=0
+while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+  # Skip delete pushes
+  if [ "$LOCAL_SHA" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  # Determine range to scan
+  if [ "$REMOTE_SHA" = "0000000000000000000000000000000000000000" ]; then
+    # New branch: scan ONLY the commits it introduces, relative to the remote
+    # mainline. The old `git diff $LOCAL_SHA` (single arg) diffed the commit
+    # against the WORKING TREE, so unrelated uncommitted drift from a concurrent
+    # agent falsely blocked the push (2026-07-15).
+    BASE=""
+    for d in main master; do
+      if git rev-parse --verify -q "refs/remotes/origin/$d" >/dev/null 2>&1; then
+        BASE=$(git merge-base "origin/$d" "$LOCAL_SHA" 2>/dev/null || true)
+        if [ -n "$BASE" ]; then break; fi
+      fi
+    done
+    if [ -n "$BASE" ]; then
+      RANGE="$BASE..$LOCAL_SHA"
+    else
+      # Unknown mainline: diff the pushed tip against the empty tree (all of the
+      # commit's content, but still never the working tree).
+      RANGE="$(git hash-object -t tree /dev/null) $LOCAL_SHA"
+    fi
+  else
+    RANGE="$REMOTE_SHA..$LOCAL_SHA"
+  fi
+
+  # Scan only added/modified lines (not deletions) for sensitive patterns.
+  # $RANGE is intentionally unquoted so the two-arg empty-tree form works.
+  SCAN_OUTPUT=$(git diff $RANGE 2>/dev/null | grep '^+' | grep -v '^+++' | "$SCAN_SCRIPT" 2>&1 || true)
+
+  if echo "$SCAN_OUTPUT" | grep -q "BLOCKED"; then
+    echo ""
+    echo "========================================="
+    echo "  PUSH BLOCKED: Sensitive identifiers    "
+    echo "========================================="
+    echo ""
+    echo "Scanning: $LOCAL_REF -> $REMOTE_REF"
+    echo ""
+    echo "$SCAN_OUTPUT"
+    echo ""
+    visibility_notice "$VISIBILITY" "$REPO_SLUG"
+    echo "Fix the violations above before pushing."
+    echo "See ~/repos/your private context repo/sensitive-identifiers.md for replacement values."
+    echo ""
+    FOUND_ISSUES=1
+  fi
+done
+
+if [ "$FOUND_ISSUES" -eq 1 ]; then
+  echo "To bypass (emergency only): git push --no-verify"
+  exit 1
+fi
+
+exit 0

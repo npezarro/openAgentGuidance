@@ -1,9 +1,0 @@
-# Read state from an API that queries now, not one that reports a value captured at initialization
-
-Any state you will report to a person or branch a decision on should come from an interface whose contract is "read the current value," not from one that returns a structure populated when a component started up. Snapshot fields look identical to live fields in the output: same names, same types, same apparent authority, no staleness marker.
-
-The failure mechanism is partial staleness. A cached structure often mixes fields that never change (and so remain correct) with fields that change at runtime (and so drift). The correct fields lend credibility to the wrong ones, and a report built from the structure is confidently, specifically wrong rather than obviously broken. Diagnosis then proceeds from a false premise, and the time lost is not the lookup, it is every conclusion built on top of it.
-
-When two independent interfaces disagree about the same instant, that is not noise to average out or a tie to break by picking the likelier number. It means at least one of them is not reading live state, and identifying which one is the actual question. Resolve it by going to the interface with the strongest freshness contract rather than adjudicating between whichever two happened to be convenient.
-
-Apply this by auditing, for each state value in a report, whether its source recomputes on read. Suspect anything returned as a device or driver descriptor, anything sampled once at process start, anything served from an object cache, and anything whose documentation says a field is "set at" some earlier event. Confirm a fix from a different observer than the one used to make it: restart the downstream consumer and check what it reports, rather than re-reading the interface just written to.

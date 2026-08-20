@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# commit-msg hook: keeps a public repo's commit log anonymous.
+#
+# The pre-commit hook scans staged FILE CONTENT. Nothing scanned the commit
+# MESSAGE, and a message is published exactly as widely as the diff is: it is
+# on the commits page, in the Atom feed, and in every `git log` a cloner runs.
+# A real leak: a public commit body quoted the requester verbatim and named a
+# private community, a third party, and two companies. The diff had been written
+# the same way, so a content-only gate would not have caught the message either.
+# Both need the same rule.
+#
+# Two checks, both public-repo-only:
+#   1. sensitive identifiers, via the same security-scan.sh the diff uses
+#   2. direct attribution: a quoted directive tied to a named person
+#
+# Private repos are where attribution BELONGS, so check 2 is skipped there
+# rather than warned on -- a warning nobody can act on trains people to ignore it.
+#
+# Install: bash hooks/install-hooks.sh
+# Bypass:  git commit --no-verify   (deliberate exception, not a workflow)
+
+set -uo pipefail
+
+MSG_FILE="${1:?commit-msg hook requires the message file path}"
+
+# Checks live in the shared library, so the commit gate and the `gh` gate
+# (hooks/public-metadata-guard.sh) cannot drift apart.
+#
+# Two candidate paths, in this order: a sibling lib/ (true when running from the
+# repo or a worktree, which is how this gets tested) and the canonical checkout
+# (true for the copies installed into .git/hooks, where no sibling lib/ exists).
+# Getting this wrong is silent: a missing library takes the fail-open path and
+# every check is skipped while the hook still reports success, which is how a
+# refactor of this file briefly disabled both gates.
+LIB=""
+for cand in "$(dirname "$0")/lib/anonymity-check.sh" \
+            "$HOME/repos/openAgentGuidance/hooks/lib/anonymity-check.sh"; do
+  [ -r "$cand" ] && { LIB="$cand"; break; }
+done
+if [ -z "$LIB" ]; then
+  # Never block on our own breakage, but never do it quietly either.
+  echo "WARNING: anonymity-check.sh not found; commit-msg gate DISABLED for this commit." >&2
+  exit 0
+fi
+# shellcheck source=lib/anonymity-check.sh
+source "$LIB"
+
+# Strip git's own comment lines and the scissors section; they are never committed.
+MSG_BODY=$(sed -e '/^#/d' -e '/^------------------------ >8 /,$d' "$MSG_FILE")
+[ -z "${MSG_BODY//[[:space:]]/}" ] && exit 0   # empty message: git aborts anyway
+
+VISIBILITY=$(repo_visibility .)
+
+fail() {
+  echo ""
+  echo "========================================="
+  echo "  COMMIT BLOCKED: commit message         "
+  echo "========================================="
+  echo ""
+  echo "$1"
+  echo ""
+  anon_split_advice
+  echo ""
+  echo "To bypass (deliberate exception): git commit --no-verify"
+  exit 1
+}
+
+# ── Check 1: sensitive identifiers ────────────────────────────────────
+if scan_identifiers_available; then
+  if ! SCAN_OUTPUT=$(printf '%s\n' "$MSG_BODY" | scan_identifiers); then
+    fail "Sensitive identifiers in the commit message:
+
+$SCAN_OUTPUT
+
+See the identifier list your SCAN_SCRIPT uses for replacement values."
+  fi
+else
+  echo "WARNING: security-scan.sh not found; identifier check skipped." >&2
+fi
+
+# ── Check 2: direct attribution (public repos only) ───────────────────
+# See scan_attribution() in the library for why it is scoped this narrowly and
+# how it was calibrated.
+if [ "$VISIBILITY" = "PUBLIC" ]; then
+  if ! ATTRIB=$(printf '%s\n' "$MSG_BODY" | scan_attribution); then
+    fail "Direct attribution in a PUBLIC repo's commit message:
+
+$ATTRIB
+
+Rewrite it to state the rule and the evidence, dropping who asked. Put the
+quote, the date, and the requester in your private context repo commit instead."
+  fi
+fi
+
+exit 0

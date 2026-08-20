@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# pre-commit hook: blocks sensitive identifiers in ANY repo (private ones too).
+# Scans staged changes for sensitive identifiers before allowing commit.
+# Uses security-scan.sh from your private context repo for pattern matching.
+# Enforces on private repos too; visibility only selects the wording.
+#
+# Install: bash hooks/install-hooks.sh
+
+set -euo pipefail
+
+# Overridable so the test suite can inject a stub scanner. A real sensitive
+# string cannot be used as a fixture here: this repo is PUBLIC, so committing
+# one would be the very thing these hooks exist to prevent.
+SCAN_SCRIPT="${SCAN_SCRIPT:-$HOME/repos/openAgentGuidance/scripts/secret-scan.sh}"
+
+if [ ! -x "$SCAN_SCRIPT" ]; then
+  echo "WARNING: security-scan.sh not found at $SCAN_SCRIPT"
+  echo "Skipping sensitive identifier check. Install your private context repo to enable."
+  exit 0
+fi
+
+# Every repo is scanned, private ones included. Visibility only picks the wording,
+# so a missing library degrades the message and never the gate.
+#
+# Lookup and wording come from the shared library, so this hook and git-pre-push
+# cannot disagree about the same repo -- each used to carry its own inline copy.
+REPO_SLUG=""
+REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+if [[ "$REMOTE_URL" =~ github\.com[:/]([^/]+/[^/.]+) ]]; then
+  REPO_SLUG="${BASH_REMATCH[1]%.git}"
+fi
+
+VISIBILITY="UNKNOWN"
+LIB=""
+for cand in "$(dirname "$0")/lib/anonymity-check.sh" \
+            "$HOME/repos/openAgentGuidance/hooks/lib/anonymity-check.sh"; do
+  [ -r "$cand" ] && { LIB="$cand"; break; }
+done
+if [ -n "$LIB" ]; then
+  # shellcheck source=lib/anonymity-check.sh
+  source "$LIB"
+  VISIBILITY=$(repo_visibility .)
+else
+  echo "WARNING: anonymity-check.sh not found; scanning anyway, visibility unknown." >&2
+  visibility_notice() { echo "Could not determine visibility for ${2:-this repo}, so it is treated as public."; }
+fi
+
+# Scan only added/modified lines (not deletions) for sensitive patterns
+SCAN_OUTPUT=$(git diff --cached | grep '^+' | grep -v '^+++' | "$SCAN_SCRIPT" 2>&1 || true)
+
+if echo "$SCAN_OUTPUT" | grep -q "BLOCKED"; then
+  echo ""
+  echo "========================================="
+  echo "  COMMIT BLOCKED: Sensitive identifiers  "
+  echo "========================================="
+  echo ""
+  echo "$SCAN_OUTPUT"
+  echo ""
+  visibility_notice "$VISIBILITY" "$REPO_SLUG"
+  echo "Fix the violations above before committing."
+  echo "See ~/repos/your private context repo/sensitive-identifiers.md for replacement values."
+  echo ""
+  echo "To bypass (emergency only): git commit --no-verify"
+  exit 1
+fi
+
+exit 0
