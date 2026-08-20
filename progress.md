@@ -13,3 +13,7 @@
 ### Why the rebuild
 
 The first version distilled the source into five abstract essays. Correctly screened, isolated distiller, fail-closed gate, daily cron, and useless: nobody can use a principle with every operational detail removed. Rebuilt as the harness itself. The lesson became `ESSENTIAL.md` rule 9.
+
+### Repo description (GitHub metadata, not a commit)
+
+The rebuild left the repo's GitHub description reading "Distilled, screened operating lessons from running coding agents against real infrastructure" — the superseded essay model. It is the first line a visitor reads and the `<meta name="description">` search engines index, and no commit gate can see it because it never passes through git. Replaced 2026-08-19 with a description of the harness. If the shape of this repo changes again, the description is a separate thing to change.
