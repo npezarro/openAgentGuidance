@@ -12,7 +12,7 @@ If you spawn a long-running process (`npm run dev`, a background build, a watch 
 - **Don't assume your process manager will manage it.** Only processes declared in the process manager's config (e.g. `ecosystem.config.cjs`) are managed. Anything you start with `node`, `npm run dev`, or `&` is orphaned when your session ends.
 
 ```bash
-# Start a dev server — note the PID
+# Start a dev server: note the PID
 npm run dev &
 DEV_PID=$!
 echo "Dev server running on PID $DEV_PID"
@@ -64,7 +64,7 @@ When PM2 restarts a process, the old Node instance may not release its port befo
    ```js
    function shutdown() {
      server.close(() => {
-       // Close DB BEFORE process.exit() — flushes WAL, releases locks
+       // Close DB BEFORE process.exit(): flushes WAL, releases locks
        if (db && typeof db.close === 'function') db.close();
        process.exit(0);
      });
@@ -87,7 +87,7 @@ When PM2 restarts a process, the old Node instance may not release its port befo
    set -a
    if [ -f "$(dirname "$0")/.env" ]; then source "$(dirname "$0")/.env"; fi
    set +a
-   # Check for both server.js AND static assets — server.js can exist from a partial build
+   # Check for both server.js AND static assets: server.js can exist from a partial build
    if [ ! -f "$(dirname "$0")/.next/standalone/server.js" ] || [ ! -d "$(dirname "$0")/.next/standalone/.next/static" ]; then
      npm run build
    fi
@@ -161,10 +161,10 @@ PM2's `cron_restart` + `autorestart: false` only restarts a process that PM2 sti
 **Fix:** Use `docker compose down && docker compose up -d` instead of `docker compose restart` for any operation that requires the container to pick up updated host files:
 
 ```bash
-# WRONG — container process restarts but bind mount stays stale
+# WRONG: container process restarts but bind mount stays stale
 docker compose restart
 
-# CORRECT — container is fully recreated, bind mounts are fresh
+# CORRECT: container is fully recreated, bind mounts are fresh
 docker compose down && docker compose up -d
 ```
 
@@ -179,10 +179,10 @@ docker compose down && docker compose up -d
 When running `docker exec` against a container that has a non-root application user (e.g. a `node` user), **always pass `--user <username>`** on every exec call. Without it, `docker exec` runs as root: files written inside the container (credentials, config) land in `/root/` instead of `/home/<user>/`, and the application process (running as `node`) cannot read them.
 
 ```bash
-# WRONG — exec runs as root, credentials written to /root/.claude/
+# WRONG: exec runs as root, credentials written to /root/.claude/
 docker exec "$CONTAINER" sh -c 'echo data > /home/node/.claude/credentials.json'
 
-# CORRECT — exec runs as node, credentials land where the app reads them
+# CORRECT: exec runs as node, credentials land where the app reads them
 docker exec --user node "$CONTAINER" sh -c 'echo data > /home/node/.claude/credentials.json'
 ```
 
@@ -262,10 +262,10 @@ When scripts use `set -u` (nounset), referencing an unset positional parameter l
 **Fix:** Use `${N:-}` (empty default) or `${N:-default}` for any positional parameter that may not be passed:
 
 ```bash
-# WRONG — exits if $2 is not provided under set -u
+# WRONG: exits if $2 is not provided under set -u
 if [[ "$2" == "--bg" ]]; then
 
-# RIGHT — defaults to empty string
+# RIGHT: defaults to empty string
 if [[ "${2:-}" == "--bg" ]]; then
 ```
 
@@ -278,10 +278,10 @@ Applies to any script using `set -euo pipefail` with optional args.
 ```bash
 export TARGETS=""         # caller wants to skip the restart step
 
-# WRONG — empty string treated as unset, defaults to "a b c"
+# WRONG: empty string treated as unset, defaults to "a b c"
 TARGETS="${TARGETS:-a b c}"
 
-# CORRECT — only substitutes when TARGETS is genuinely unset
+# CORRECT: only substitutes when TARGETS is genuinely unset
 TARGETS="${TARGETS-a b c}"
 ```
 
@@ -294,7 +294,7 @@ Always guard `smtplib` send calls with a basic address sanity check. If `to_emai
 ```python
 def send_completion_email(to_email: str, subject: str, body: str) -> None:
     if not to_email or "@" not in to_email:
-        log.warning(f"Skipping email — invalid address: {to_email!r}")
+        log.warning(f"Skipping email: invalid address: {to_email!r}")
         return
 
     with smtplib.SMTP("smtp.gmail.com", 587) as server:
@@ -311,10 +311,10 @@ def send_completion_email(to_email: str, subject: str, body: str) -> None:
 To apply config changes:
 
 ```bash
-# BAD — restarts the process but ignores ecosystem.config.js changes
+# BAD: restarts the process but ignores ecosystem.config.js changes
 pm2 restart my-app
 
-# GOOD — re-reads ecosystem.config.js and applies all config changes
+# GOOD: re-reads ecosystem.config.js and applies all config changes
 pm2 startOrRestart ecosystem.config.js
 ```
 
@@ -330,7 +330,7 @@ Always run `pm2 save` after `pm2 startOrRestart` to persist the updated config f
 
 Services that connect to Postgres (or any external DB) at module load time can enter a tight PM2 restart loop if the DB isn't ready on first boot or after a host reboot. Two-layer fix:
 
-**Layer 1 — PM2 exponential backoff:** Add `exp_backoff_restart_delay: 100` to the ecosystem config. PM2 doubles the restart delay on each consecutive failure (100ms -> 200ms -> 400ms) instead of hammering the process in a tight loop.
+**Layer 1: PM2 exponential backoff:** Add `exp_backoff_restart_delay: 100` to the ecosystem config. PM2 doubles the restart delay on each consecutive failure (100ms -> 200ms -> 400ms) instead of hammering the process in a tight loop.
 
 ```js
 module.exports = {
@@ -343,7 +343,7 @@ module.exports = {
 };
 ```
 
-**Layer 2 — Application-level connection retry:** For Prisma, add startup retry in `src/lib/db.ts` so the process doesn't crash before the DB becomes available:
+**Layer 2: Application-level connection retry:** For Prisma, add startup retry in `src/lib/db.ts` so the process doesn't crash before the DB becomes available:
 
 ```ts
 if (process.env.NODE_ENV === "production") {
@@ -370,15 +370,15 @@ if (process.env.NODE_ENV === "production") {
 `date +%H` emits zero-padded hours (`08`, `09`). Bash `(( ))` arithmetic interprets numbers starting with `0` as octal; `08` and `09` are invalid octal, causing arithmetic to fail with `value too great for base` at those hours only.
 
 ```bash
-# BAD — fails silently (or aborts with set -e) at hours 08 and 09
+# BAD: fails silently (or aborts with set -e) at hours 08 and 09
 current_hour=$(date +%H)          # "08"
 (( current_hour >= 8 )) && ...    # bash: 08: value too great for base
 
-# GOOD — no zero-pad (GNU date)
+# GOOD: no zero-pad (GNU date)
 current_hour=$(date +%-H)         # "8"
 (( current_hour >= 8 )) && ...    # works
 
-# macOS alternative — printf forces decimal interpretation
+# macOS alternative: printf forces decimal interpretation
 current_hour=$(printf '%d' $(date +%H))
 ```
 
@@ -416,7 +416,7 @@ Procedure:
 When using `set -e` (errexit), a failing command causes the script to exit **immediately** before the next line executes. This makes bare `$?` capture after a command dead code; the error handler that reads `$?` never runs.
 
 ```bash
-# WRONG — set -e exits after 'some_command' fails; EXIT_CODE=$? never executes
+# WRONG: set -e exits after 'some_command' fails; EXIT_CODE=$? never executes
 set -e
 some_command
 EXIT_CODE=$?
@@ -424,7 +424,7 @@ if [ "$EXIT_CODE" -ne 0 ]; then
   notify "Failed: $EXIT_CODE"   # unreachable
 fi
 
-# RIGHT — || captures exit code inline without triggering set -e
+# RIGHT: || captures exit code inline without triggering set -e
 EXIT_CODE=0
 some_command || EXIT_CODE=$?
 if [ "$EXIT_CODE" -ne 0 ]; then
@@ -441,12 +441,12 @@ fi
 Never call `git stash pop` unconditionally in a script. If the script stashed nothing (because the working tree was clean), an unconditional pop will dump a **pre-existing user stash** onto whatever branch is checked out, potentially overwriting unrelated in-progress work.
 
 ```bash
-# WRONG — pops whatever is on the stash stack, even if this script didn't push it
+# WRONG: pops whatever is on the stash stack, even if this script didn't push it
 git stash
 # ... do work ...
 git stash pop   # might dump user's saved state onto wrong branch
 
-# RIGHT — track whether THIS script stashed, only pop what we pushed
+# RIGHT: track whether THIS script stashed, only pop what we pushed
 STASHED=false
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
   git stash --quiet && STASHED=true
@@ -463,7 +463,7 @@ When a PM2 process is a **script** (runs, does work, then exits with code 0), PM
 **Rule:** For any PM2 process that exits on completion (data push scripts, sync jobs, batch processors), always pair `cron_restart` with `autorestart: false`:
 
 ```js
-// BAD — script exits 0 after each push; PM2 re-fires immediately, ignoring cron
+// BAD: script exits 0 after each push; PM2 re-fires immediately, ignoring cron
 module.exports = {
   apps: [{
     name: "dashboard-push",
@@ -473,7 +473,7 @@ module.exports = {
   }]
 };
 
-// GOOD — autorestart: false lets cron_restart be the only trigger
+// GOOD: autorestart: false lets cron_restart be the only trigger
 module.exports = {
   apps: [{
     name: "dashboard-push",
@@ -525,7 +525,7 @@ echo "my prompt" | claude --print --model sonnet
 
 Some environments (notably WSL2) suffer intermittent DNS blips, especially during overnight cron windows, causing `requests.exceptions.ConnectionError` (`NameResolutionError`) on calls to external APIs. One blip drops the entire poll cycle and generates noisy ERROR logs.
 
-**Correct pattern** — wrap the call in a manual retry loop:
+**Correct pattern**: wrap the call in a manual retry loop:
 
 ```python
 def _api_get(url, params=None, _retries=2):
@@ -574,7 +574,7 @@ function isTransientError(err: any): boolean {
     msg.includes("socket hang up")
   );
 }
-// 3 attempts, 5s between retries — only for isTransientError(err)
+// 3 attempts, 5s between retries: only for isTransientError(err)
 ```
 
 Do NOT retry non-transient errors (400/401/403/503 "slots busy", 429 rate-limit); those must fail immediately.
@@ -607,7 +607,7 @@ req.on('error', (err) => {
 ```js
 // worker.ecosystem.config.js
 env: {
-  SERVICE_URL: 'http://127.0.0.1:3010', // loopback — avoids DNS failures with public endpoint
+  SERVICE_URL: 'http://127.0.0.1:3010', // loopback: avoids DNS failures with public endpoint
 }
 ```
 
@@ -646,11 +646,11 @@ while (true) {
 When reading rows that store serialized JSON (metadata columns, config blobs, event payloads), wrap every `JSON.parse()` call in a `try/catch`. A single corrupt or malformed row should log a warning and be skipped or return a safe default; it must NOT throw uncaught and return a 500 for the entire endpoint/query.
 
 ```javascript
-// Bad — one bad row crashes the entire request
+// Bad: one bad row crashes the entire request
 const rows = await db.query('SELECT data FROM events');
 return rows.map(r => JSON.parse(r.data));
 
-// Good — corrupt row logged and skipped
+// Good: corrupt row logged and skipped
 return rows.flatMap(r => {
   try {
     return [JSON.parse(r.data)];
@@ -727,9 +727,9 @@ Bash **auto-populates `$HOSTNAME`** with the system hostname. The `${HOSTNAME:-d
 
 **Fix:** Force-set the bind address explicitly:
 ```bash
-export HOSTNAME="127.0.0.1"   # GOOD — force-set, always wins
+export HOSTNAME="127.0.0.1"   # GOOD: force-set, always wins
 # NOT this:
-export HOSTNAME=${HOSTNAME:-"0.0.0.0"}  # BAD — bash pre-fills $HOSTNAME, fallback never triggers
+export HOSTNAME=${HOSTNAME:-"0.0.0.0"}  # BAD: bash pre-fills $HOSTNAME, fallback never triggers
 ```
 
 Other bash builtins similarly always populated (must not be used as `:-` defaults): `BASH_VERSION`, `PWD`, `OLDPWD`, `EUID`, `UID`, `PATH`, `SHELL`.
@@ -850,11 +850,11 @@ if (process.env.NODE_ENV === "production") {
 `PrismaLibSql` from `@prisma/adapter-libsql` expects a **Config object** `{ url, authToken? }`; it does NOT accept a pre-constructed `@libsql/client` instance.
 
 ```ts
-// CORRECT — Config object
+// CORRECT: Config object
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 const adapter = new PrismaLibSql({ url, authToken });
 
-// WRONG — @libsql/client instance (causes connection errors)
+// WRONG: @libsql/client instance (causes connection errors)
 import { createClient } from "@libsql/client";
 const client = createClient({ url, authToken });
 const adapter = new PrismaLibSql(client);  // wrong constructor signature
@@ -905,10 +905,10 @@ router.get('/threads/:threadId/messages', requireAuth, (req, res) => {
 When a DB column can legitimately be stored as `null` (e.g. "no target linked"), using `|| default` silently clobbers stored nulls:
 
 ```js
-// WRONG — clobbers stored null with the default; "row missing" and "row has null" are indistinguishable
+// WRONG: clobbers stored null with the default; "row missing" and "row has null" are indistinguishable
 const targetId = settings ? settings.target_instance_id || null : null;
 
-// CORRECT — preserves stored null; only defaults when the row itself is absent
+// CORRECT: preserves stored null; only defaults when the row itself is absent
 const targetId = (settings && settings.target_instance_id) !== undefined
   ? settings.target_instance_id
   : null;
@@ -932,7 +932,7 @@ Using the API ID string causes the CLI call to fail or be silently ignored:
 # CORRECT
 claude --print --model sonnet "your prompt"
 
-# WRONG — an SDK model ID, not a CLI alias
+# WRONG: an SDK model ID, not a CLI alias
 claude --print --model claude-sonnet-4-6 "your prompt"
 ```
 
@@ -1068,10 +1068,10 @@ Fixing the dangling timer with `.finally(() => clearTimeout(timeoutId))` stops t
 **Fix:** accept a cancellation signal object in the promise factory; check it before each iteration.
 
 ```typescript
-// WRONG — loop keeps running after timeout even with .finally cleanup
+// WRONG: loop keeps running after timeout even with .finally cleanup
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> { ... }
 
-// CORRECT — pass a mutable signal the timeout can flip
+// CORRECT: pass a mutable signal the timeout can flip
 function withTimeout<T>(
   promiseFn: (signal: { aborted: boolean }) => Promise<T>,
   ms: number,
@@ -1105,7 +1105,7 @@ When a batch or summarization function processes DB rows in a loop and advances 
 
 **The failure mode:**
 ```js
-// BAD — one corrupt row aborts the whole batch and the cursor never advances
+// BAD: one corrupt row aborts the whole batch and the cursor never advances
 export function buildSummary(events) {
   for (const evt of events) {
     const meta = JSON.parse(evt.metadata_json); // throws SyntaxError on corrupt row
@@ -1129,7 +1129,7 @@ export function runSummarization(config) {
 
 Net effect: no output file is ever written again; the error repeats every tick until the corrupt row ages out of retention (up to the full retention window).
 
-**Fix — defensive parse helper:**
+**Fix: defensive parse helper:**
 ```js
 function parseMetadata(evt) {
   try {
@@ -1158,7 +1158,7 @@ Fix: a `safeJsonParse(raw, fallback, context)` helper that returns a fallback (`
 
 WAL (`journal_mode = WAL`) reduces write-write contention in SQLite, but does not prevent `SQLITE_BUSY` errors when concurrent API requests hit a read-write boundary. Without a `busy_timeout`, the first concurrent access that finds the DB busy returns an immediate error (better-sqlite3 throws synchronously), which bubbles up as a 500 to the API caller.
 
-**Fix — add `busy_timeout` to the initialization pragma block:**
+**Fix: add `busy_timeout` to the initialization pragma block:**
 ```js
 function initDb() {
   db.pragma('journal_mode = WAL');
@@ -1178,11 +1178,11 @@ function initDb() {
 When using `PrismaLibSql` as the Prisma adapter, the adapter already owns the database connection. Passing `datasourceUrl` as an additional constructor option to `PrismaClient` conflicts with the adapter's connection state and causes errors.
 
 ```ts
-// WRONG — datasourceUrl conflicts with the adapter
+// WRONG: datasourceUrl conflicts with the adapter
 const adapter = new PrismaLibSql({ url });
 return new PrismaClient({ adapter, datasourceUrl: url });
 
-// CORRECT — adapter handles the connection; PrismaClient needs only the adapter
+// CORRECT: adapter handles the connection; PrismaClient needs only the adapter
 const adapter = new PrismaLibSql({ url });
 return new PrismaClient({ adapter });
 ```
@@ -1198,13 +1198,13 @@ return new PrismaClient({ adapter });
 ```bash
 if [ -f "$FAIL_MARKER" ]; then
   if [ "$(cat "$FAIL_MARKER" 2>/dev/null)" != "alerted" ]; then
-    # Second consecutive failure — alert once and suppress further pings
+    # Second consecutive failure: alert once and suppress further pings
     post_alert "Service still failing after restart" "ping"
     echo "alerted" > "$FAIL_MARKER"
     # else: already alerted, skip (persistent failure suppressed)
   fi
 else
-  # First failure — grace period, just mark it
+  # First failure: grace period, just mark it
   touch "$FAIL_MARKER"
 fi
 
@@ -1257,10 +1257,10 @@ The `+ Math.random() * 1000` jitter prevents thundering-herd retries when multip
 
 **Fix:** Iterate explicitly and call `.append()` for each value:
 ```js
-// WRONG — loses multiple values for the same key
+// WRONG: loses multiple values for the same key
 const params = new URLSearchParams(req.query);
 
-// CORRECT — handles both scalar and array values
+// CORRECT: handles both scalar and array values
 const params = new URLSearchParams();
 for (const [key, value] of Object.entries(req.query)) {
   if (Array.isArray(value)) {
@@ -1293,7 +1293,7 @@ When a PATCH-style endpoint has optional fields, a single SQLite `ON CONFLICT DO
 
 ```js
 if (instanceId !== undefined) {
-  // Full UPSERT — includes target_instance_id
+  // Full UPSERT: includes target_instance_id
   db.prepare(`
     INSERT INTO thread_settings (thread_id, user_id, mode, target_instance_id, updated_at)
     VALUES (?, ?, ?, ?, datetime('now'))
@@ -1303,7 +1303,7 @@ if (instanceId !== undefined) {
       updated_at = excluded.updated_at
   `).run(threadId, userId, mode, instanceId || null);
 } else {
-  // Reduced UPSERT — leaves target_instance_id untouched
+  // Reduced UPSERT: leaves target_instance_id untouched
   db.prepare(`
     INSERT INTO thread_settings (thread_id, user_id, mode, updated_at)
     VALUES (?, ?, ?, datetime('now'))
@@ -1323,7 +1323,7 @@ if (instanceId !== undefined) {
 **Run `PRAGMA quick_check` at startup and auto-restore from backup when corruption is detected.** SQLite corruption can occur from power loss, OOM kills mid-write, or disk I/O errors. Without a startup check the app silently serves stale or incorrect data. The pattern:
 
 ```typescript
-// In getDb() — before enabling WAL mode or running migrations:
+// In getDb(): before enabling WAL mode or running migrations:
 const db = new Database(dbPath);
 const result = db.pragma("quick_check") as { quick_check: string }[];
 if (!(result.length === 1 && result[0].quick_check === "ok")) {
@@ -1333,7 +1333,7 @@ if (!(result.length === 1 && result[0].quick_check === "ok")) {
   // 3. Remove WAL/SHM sidecar files from the corrupted DB path
   // 4. Copy backup to the DB path
   // 5. Reopen and verify the restored DB passes quick_check
-  // 6. Alert your notification channel — do NOT silently swallow the event
+  // 6. Alert your notification channel: do NOT silently swallow the event
   const restored = restoreFromBackup(dbPath);
   db = new Database(dbPath);
 }
@@ -1383,7 +1383,7 @@ Under sustained high-volume traffic, each `.then()` link retains closure referen
 **Use an explicit array-based queue with a single-instance processor:**
 
 ```js
-const queue = [];         // functions, not promises — lightweight
+const queue = [];         // functions, not promises: lightweight
 let isProcessing = false;
 
 async function processQueue() {
@@ -1420,7 +1420,7 @@ for (const sample of samples) {
 **Refinement for large payloads: queue IDs, not bodies.** When webhook payloads are large (batch dumps, sensor summaries), even the array-based queue can OOM because function closures still capture the full payload. Pattern: persist the raw event to the DB first, queue only the returned ID, then fetch from DB one-by-one during background drain:
 
 ```js
-// Phase 1 — request handler: sync DB write, return IDs to caller
+// Phase 1: request handler: sync DB write, return IDs to caller
 const [eventId] = await storeRawEvent(payload);  // returns array of IDs
 res.json({ stored: 1 });
 
@@ -1428,7 +1428,7 @@ res.json({ stored: 1 });
 queue.push(eventId);
 processQueue();
 
-// Phase 2 — drain loop re-fetches from DB per event:
+// Phase 2: drain loop re-fetches from DB per event:
 async function processQueue() {
   if (isProcessing) return;
   isProcessing = true;
@@ -1442,7 +1442,7 @@ async function processQueue() {
       await db.webhookEvent.update({ where: { id }, data: { processed: true } });
     }
   } finally {
-    isProcessing = false;   // always reset — even if an error escapes the loop
+    isProcessing = false;   // always reset, even if an error escapes the loop
   }
 }
 ```
@@ -1453,9 +1453,9 @@ async function processQueue() {
 
 When building an AI agent that researches and recommends (restaurants, vendors, candidates), structure the prompt as sequential phases that narrow candidates and deepen verification, rather than one long monolithic research pass.
 
-**Phase 1 — Initial Shortlist:** Broad search across sources. Output: ranked list of N candidates.
+**Phase 1: Initial Shortlist:** Broad search across sources. Output: ranked list of N candidates.
 
-**Phase 2 — Deep Review (highest value):** For each shortlisted candidate, extract **verbatim quotes** (2-4 per source). Do NOT paraphrase; exact quotes are the trust signal. Apply explicit **Disqualification Triggers**:
+**Phase 2: Deep Review (highest value):** For each shortlisted candidate, extract **verbatim quotes** (2-4 per source). Do NOT paraphrase; exact quotes are the trust signal. Apply explicit **Disqualification Triggers**:
 - Declining quality trend (reviews mentioning "used to be good")
 - Hygiene or service red flags in recent reviews
 - Rating trend reversal in last 6 months
@@ -1463,7 +1463,7 @@ When building an AI agent that researches and recommends (restaurants, vendors, 
 
 Output two sections: **What people are saying** (quoted snippets with attribution) and **Disqualified** (removed candidates with reason). Transparency in rejection demonstrates the agent applied real judgment; it is UX-critical, not optional.
 
-**Phase 3 — Specialty Verification:** For each surviving candidate, answer the specific expertise question (signature offerings, pricing, key differentiators) by consulting official sites or authoritative sources.
+**Phase 3: Specialty Verification:** For each surviving candidate, answer the specific expertise question (signature offerings, pricing, key differentiators) by consulting official sites or authoritative sources.
 
 **Implementation notes:**
 - Increase the LLM timeout for each additional phase; each substantive phase adds 3-5 minutes, so set timeout to `(N_phases × 5 min) + buffer`
@@ -1478,7 +1478,7 @@ Output two sections: **What people are saying** (quoted snippets with attributio
 Trying to reassign a `for…of` loop variable declared with `const` (or from destructuring with `const`) throws `TypeError: Assignment to constant variable` and crashes the loop, turning the crash into a crash loop if the process manager auto-restarts:
 
 ```javascript
-// WRONG — crashes every iteration
+// WRONG: crashes every iteration
 for (const evt of db.prepare('SELECT * FROM events').iterate()) {
   process(evt);
   evt = null; // TypeError: Assignment to constant variable
@@ -1497,7 +1497,7 @@ for (const evt of db.prepare('SELECT * FROM events').iterate()) {
 **Destructured variables from function returns are also `const` by default:**
 
 ```javascript
-// WRONG — lastId is const, can't be updated in a loop
+// WRONG: lastId is const, can't be updated in a loop
 const { summary, lastId, count } = buildSummaryFromIterator(sinceId, MAX);
 // … later trying to re-use lastId fails at assignment
 ```
@@ -1506,7 +1506,7 @@ Use `let` for any variable you intend to update after the initial binding.
 
 **Same applies to function-scope `const` null-for-GC patterns.** After a function body finishes, "help GC" null assignments on `const`-declared accumulators throw the same error:
 ```javascript
-// WRONG — cargo-cult GC hint on const variables crashes the function
+// WRONG: cargo-cult GC hint on const variables crashes the function
 const appDurations = {};
 const fileCounts   = {};
 // ... populate them ...
@@ -1520,13 +1520,13 @@ fileCounts   = null;
 When converting a string to a slug for use as a URL path segment, guard against returning an empty string. A slug-generation function that strips all non-alphanumeric characters from an empty or special-character-only input (e.g. `""`, `"!!!"`, `"   "`) produces `""`, which, if not caught, gets used as a URL path segment and probes a root endpoint. Root endpoints usually return HTTP 200, causing a false-positive "found" match.
 
 ```javascript
-// WRONG — empty/whitespace input returns [''] which probes root URLs
+// WRONG: empty/whitespace input returns [''] which probes root URLs
 function slugify(name) {
   const clean = name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim();
   return [clean.replace(/\s+/g, '-')]; // returns [''] if clean is ''
 }
 
-// CORRECT — guard immediately after cleaning
+// CORRECT: guard immediately after cleaning
 function slugify(name) {
   const clean = name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim();
   if (!clean) return []; // never use a blank slug as a URL path segment
@@ -1675,10 +1675,10 @@ Root cause: a stale client sends model IDs the backend no longer accepts. After 
 The `-i` (image) flag on `codex exec` accepts multiple values (variadic). Providing the prompt as a positional argument after images causes it to be consumed as an additional image path:
 
 ```bash
-# WRONG — "Describe the store logo" is treated as an image path
+# WRONG: "Describe the store logo" is treated as an image path
 codex exec --skip-git-repo-check -i receipt.jpg "Describe the store logo"
 
-# RIGHT — pipe the prompt via stdin; -i takes only image paths
+# RIGHT: pipe the prompt via stdin; -i takes only image paths
 echo "Describe the store logo" | codex exec --skip-git-repo-check -i receipt.jpg
 ```
 
@@ -1689,10 +1689,10 @@ echo "Describe the store logo" | codex exec --skip-git-repo-check -i receipt.jpg
 `codex exec` echoes your input prompt in the response before the model's answer. Grepping the raw output for a keyword you also used in the prompt produces false positives:
 
 ```bash
-# WRONG — finds the echoed prompt, not the model's answer
+# WRONG: finds the echoed prompt, not the model's answer
 echo "Reply with OK if this works" | codex exec --skip-git-repo-check | grep "OK"
 
-# RIGHT — read the full output or strip the first line
+# RIGHT: read the full output or strip the first line
 echo "Reply with OK if this works" | codex exec --skip-git-repo-check
 ```
 

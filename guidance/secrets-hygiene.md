@@ -54,7 +54,7 @@ Never in:
 # GOOD: Source from external file, fail loudly if missing
 ENV_FILE="${MY_ENV_FILE:-$HOME/.config/myproject/.env}"
 [ -f "$ENV_FILE" ] && source "$ENV_FILE"
-HOST="${MY_HOST:?MY_HOST not set — see .env.example}"
+HOST="${MY_HOST:?MY_HOST not set: see .env.example}"
 
 # GOOD: Read from cache, no SSH fallback that reveals paths
 get_token() {
@@ -297,7 +297,7 @@ which git-filter-repo || ls ~/.local/bin/git-filter-repo
 To change commit author/committer emails without touching file content (e.g., removing personal emails from public repo history), use `--mailmap`:
 
 ```bash
-# 1. Unshallow first — filter-repo refuses to run on shallow clones
+# 1. Unshallow first: filter-repo refuses to run on shallow clones
 git fetch --unshallow 2>/dev/null || true
 
 # 2. Create a mailmap file
@@ -334,7 +334,7 @@ Some repos on disk are deliberately local-only archives: pre-sanitization backup
 ```bash
 # Immediately after writing "NEVER PUSH" in CLAUDE.md:
 git remote remove origin
-# Verify — should produce no output:
+# Verify: should produce no output:
 git remote -v
 ```
 

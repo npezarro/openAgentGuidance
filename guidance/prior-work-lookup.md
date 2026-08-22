@@ -1,5 +1,5 @@
 <!-- Load when: finding past conversations and prior work -->
-# Prior Work Lookup — Where to Search for Past Conversations
+# Prior Work Lookup: Where to Search for Past Conversations
 
 When someone says "we did this before" or "our previous work on X", search these sources in order.
 
@@ -11,7 +11,7 @@ command) rather than a committed file. A typical interface:
 
 ```bash
 R=~/repos/session-recall/recall
-$R "token refresh 401"                        # keyword — error strings, commands, names
+$R "token refresh 401"                        # keyword: error strings, commands, names
 $R "static asset drift" --project <name> --since 2026-06-01
 $R --semantic "why did we abandon the local worker bridge"   # meaning-based questions
 $R show <session-id>:<line>                   # expand a hit with surrounding context
@@ -73,7 +73,7 @@ gh search commits "<keyword>" --owner <your-org-or-user> --limit 20
 
 ## 5. Context/Progress Files
 
-- `context.md` and `progress.md` in each repo — handoff notes between sessions
+- `context.md` and `progress.md` in each repo: handoff notes between sessions
 - Broader deliverables directories in your private context repo
 
 ## 6. Memory
@@ -81,7 +81,7 @@ gh search commits "<keyword>" --owner <your-org-or-user> --limit 20
 - The agent memory directory for this project (under `~/.claude/projects/<project-slug>/memory/`)
 - Check existing memory files for project context
 
-## 7. Usage Mining — "is this file/rule/tool actually being used?"
+## 7. Usage Mining: "is this file/rule/tool actually being used?"
 
 Session logs answer *whether a reference file has ever been loaded*, which is the only honest basis
 for pruning an always-loaded index (a root agent rules file, an essentials file, a memory index, a
@@ -102,8 +102,8 @@ Two traps, both of which produce a confident wrong answer:
 - **Read count is confounded by age.** A file added last week cannot have 4,000 sessions of history.
   Check when it was added before reading a low count as "cold".
 
-A zero-read file is not automatically dead weight. Distinguish (a) *superseded* — a skill or a root
-rules file now owns the function, so the pointer is redundant; (b) *failed pointer* — the "load when"
+A zero-read file is not automatically dead weight. Distinguish (a) *superseded*: a skill or a root
+rules file now owns the function, so the pointer is redundant; (b) *failed pointer*: the "load when"
 description never matches real tasks, so fix the description rather than delete the file; (c)
 genuinely cold. Cross-check against skill references (`grep -rho 'guidance/[a-z0-9-]*\.md'
 <your-skills-repo>`) before cutting: a file skills route to is reachable even with no index entry.
@@ -115,7 +115,7 @@ in a manifest. Reversible in one line; deletion is not.
 ## Gaps
 
 - A recall index captures conversation history verbatim even when a session produced no commit,
-  closeout, or chat post — as long as the session ran on an indexed host and the index has been
+  closeout, or chat post: as long as the session ran on an indexed host and the index has been
   refreshed (run it on a schedule, e.g. hourly via cron).
 - Remaining gap: sessions that ran only on another machine are not in the local index. A shared
   notification channel is the cross-machine backstop, but it only captures logged turns. For those,

@@ -1,7 +1,7 @@
 # context.md
 
 ## Last Updated
-2026-08-21 — GitHub repo description replaced (it still described the superseded lessons model); portfolio now links here instead of the private source. Earlier: repo created, rebuilt from a lessons feed into the working harness, 19 guidance files published.
+2026-08-21: GitHub repo description replaced (it still described the superseded lessons model); portfolio now links here instead of the private source. Earlier: repo created, rebuilt from a lessons feed into the working harness, 19 guidance files published.
 
 ## What This Repo Is
 
@@ -21,7 +21,7 @@ The **public mirror** of a private agent-guidance system. It is the harness itse
 
 The private source repo runs `publish-open-guidance.sh` daily at 05:30. It rewrites changed allowlisted files to strip private detail, screens them, regenerates the index, and pushes. It fails closed: a missing scanner, an empty pattern list, or any screening hit aborts the run.
 
-**Two files are hand-maintained here and never auto-synced:** `agent.md` and `guidance/ESSENTIAL.md`. A machine rewrite either guts them or leaks the incidents they encode. The publisher prints a warning naming them when the private originals change. **That warning is the only signal that these two are drifting** — nothing else will catch it.
+**Two files are hand-maintained here and never auto-synced:** `agent.md` and `guidance/ESSENTIAL.md`. A machine rewrite either guts them or leaks the incidents they encode. The publisher prints a warning naming them when the private originals change. **That warning is the only signal that these two are drifting**: nothing else will catch it.
 
 ## Ungated surfaces (nothing in git can see these)
 

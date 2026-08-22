@@ -56,8 +56,8 @@ npm install <package> --save-dev --save-exact
 ```
 
 **After installing:**
-1. Run `npm run build` — confirm no conflicts.
-2. Run `npm test` — confirm no regressions.
+1. Run `npm run build`: confirm no conflicts.
+2. Run `npm test`: confirm no regressions.
 3. Commit `package.json` AND `package-lock.json` together.
 
 ## Updating Dependencies
@@ -69,7 +69,7 @@ npm outdated
 # Update a specific package
 npm install <package>@latest --save-exact
 
-# Update all (be cautious — test thoroughly)
+# Update all (be cautious: test thoroughly)
 npm update
 ```
 

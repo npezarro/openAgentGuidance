@@ -88,10 +88,10 @@ Encountered directly: this bug made a scheduled security scanner fail silently f
 **Fix:** Use `grep -c 'pattern' || true` instead. `grep -c` already outputs `0` on no match; it just needs the exit code suppressed, not a fallback echo.
 
 ```bash
-# WRONG — produces "0\n0" with pipefail
+# WRONG: produces "0\n0" with pipefail
 count=$(grep -c 'pattern' file || echo "0")
 
-# RIGHT — outputs "0" and suppresses exit code 1
+# RIGHT: outputs "0" and suppresses exit code 1
 count=$(grep -c 'pattern' file || true)
 ```
 
@@ -102,7 +102,7 @@ count=$(grep -c 'pattern' file || true)
 **The scenario:** You run a command, pipe it somewhere to trim the output, and chain a confirmation:
 
 ```bash
-# WRONG — prints "PUSHED" even when the push fails.
+# WRONG: prints "PUSHED" even when the push fails.
 git push -q origin main 2>&1 | tail -2 && echo "PUSHED"
 ```
 
@@ -111,10 +111,10 @@ Without `pipefail`, `$?` is `tail`'s exit code, and `tail` almost always succeed
 This is worse than an ordinary bug because the wrong output is a **claim about system state**.
 
 ```bash
-# RIGHT — capture, test, then report
+# RIGHT: capture, test, then report
 if out=$(git push -q origin main 2>&1); then echo "PUSHED"; else echo "FAILED: $out"; fi
 
-# ALSO RIGHT — check the real command, not the pipeline
+# ALSO RIGHT: check the real command, not the pipeline
 git push -q origin main; rc=$?; [ $rc -eq 0 ] && echo "PUSHED"
 ```
 
@@ -174,10 +174,10 @@ Worth scanning for automatically: a health monitor can grep every repo for agent
 When calling the CLI with piped stdin **and** additional flags like `--model`, use `claude --print`, **not** `claude -p`. The `-p` flag is positional: it treats the **next CLI argument** as a literal prompt string, so `claude -p --model <model-id>` passes `"--model <model-id>"` as the prompt and ignores stdin entirely.
 
 ```bash
-# WRONG — -p eats --model as the prompt; stdin is ignored
+# WRONG: -p eats --model as the prompt; stdin is ignored
 echo "$prompt" | claude -p --model <model-id>
 
-# CORRECT — --print enables stdin pass-through; --model is parsed as a flag
+# CORRECT: --print enables stdin pass-through; --model is parsed as a flag
 echo "$prompt" | claude --print --model <model-id>
 ```
 
@@ -378,7 +378,7 @@ EXIT_CODE=$?                                 # never reached on failure
 if [ "$EXIT_CODE" -eq 124 ]; then ...        # dead code
 ```
 
-Under `set -e`, any non-zero exit terminates the script before `EXIT_CODE=$?` runs. Every downstream failure path (timeout logging, alerts, state writes, cost tracking) is unreachable. The same applies to command substitution: `RESULT=$(claude ...)` exits the script before the failure branch. A subtle variant: `OUT=$(cmd || true); RC=$?` — the `|| true` guarantees `RC` is always 0, silently disabling the gate that reads it.
+Under `set -e`, any non-zero exit terminates the script before `EXIT_CODE=$?` runs. Every downstream failure path (timeout logging, alerts, state writes, cost tracking) is unreachable. The same applies to command substitution: `RESULT=$(claude ...)` exits the script before the failure branch. A subtle variant: `OUT=$(cmd || true); RC=$?`: the `|| true` guarantees `RC` is always 0, silently disabling the gate that reads it.
 
 Encountered directly: three autonomous runners plus a verify script all had this bug. Zero failure alerts had ever fired across roughly 1,000 combined runs; a 45-minute run timed out with no log entry, no state write, and a reused run ID the next day; a verify gate passed proven test failures for weeks.
 
@@ -389,7 +389,7 @@ EXIT_CODE=0
 timeout 2700 claude -p "$PROMPT" > "$LOG" || EXIT_CODE=$?
 ```
 
-**Rule:** In any `set -e` script, a command whose failure you intend to handle must have its exit captured via `|| VAR=$?` (or run inside an `if`). Never write a bare command followed by `$?`, and never read `$?` after `|| true`. Audit: `grep -n 'EXIT_CODE=\$?\|_EXIT=\$?' <script>` — each hit must be on the same line as the command it measures.
+**Rule:** In any `set -e` script, a command whose failure you intend to handle must have its exit captured via `|| VAR=$?` (or run inside an `if`). Never write a bare command followed by `$?`, and never read `$?` after `|| true`. Audit: `grep -n 'EXIT_CODE=\$?\|_EXIT=\$?' <script>`: each hit must be on the same line as the command it measures.
 
 ### The complement: `exit $?` is a landmine for any later edit
 
@@ -597,10 +597,10 @@ signature = hashlib.md5(clean_line.encode()).hexdigest()
 Avoid structured-looking prefixes like `SUCCESS:`, `ERROR:`, or `WARN:` in info/success log messages of a monitoring daemon. If the daemon (or a downstream watcher) pattern-matches on its own log output, a `SUCCESS:` prefix in a normal info line can look like a different error class and re-enter the alert pipeline.
 
 ```python
-# BAD — "SUCCESS:" could be caught by a pattern scanner watching for status keywords
+# BAD: "SUCCESS:" could be caught by a pattern scanner watching for status keywords
 logger.info(f"SUCCESS: fix complete (cost: ${cost:.4f})")
 
-# GOOD — plain message; log level already communicates severity
+# GOOD: plain message; log level already communicates severity
 logger.info(f"fix complete (cost: ${cost:.4f})")
 ```
 

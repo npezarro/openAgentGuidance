@@ -74,10 +74,10 @@ A fallback/waterfall (try A, else B, else C) is the highest-risk structure for a
 - **Use typed mock helpers instead of `as any`:** Create factory functions that return complete typed objects rather than casting partial objects. This catches shape mismatches at compile time and eliminates lint warnings.
 
 ```typescript
-// WRONG — hides type errors, triggers no-explicit-any lint warnings
+// WRONG: hides type errors, triggers no-explicit-any lint warnings
 const token = { access_token: "test" } as any;
 
-// RIGHT — typed factory returns a complete object
+// RIGHT: typed factory returns a complete object
 function fakeOAuthToken(overrides?: Partial<OAuthToken>): OAuthToken {
   return { access_token: "test", refresh_token: "r", expires_at: Date.now() + 3600000, ...overrides };
 }
@@ -129,12 +129,12 @@ When adding tests to a server-side repo, the server often needs minor changes to
 Prevent `app.listen()` from firing when the file is imported by tests:
 
 ```javascript
-// ESM — import.meta.url guard
+// ESM: import.meta.url guard
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   app.listen(PORT, () => console.log(`Listening on ${PORT}`));
 }
 
-// CJS — require.main guard
+// CJS: require.main guard
 if (require.main === module) {
   app.listen(PORT);
 }
@@ -163,7 +163,7 @@ When a module runs a DB initialization check at **import time** (not call time),
 export default defineConfig({
   test: {
     env: {
-      // Dummy URL — db.ts throws at import time if DATABASE_URL is unset.
+      // Dummy URL: db.ts throws at import time if DATABASE_URL is unset.
       // Tests only exercise pure functions and never open a connection.
       DATABASE_URL: "postgresql://test:test@localhost:5432/test",
     },
@@ -223,7 +223,7 @@ A standard `.github/workflows/test.yml` that runs tests on every push and PR to 
 name: CI
 on:
   push:
-    branches: [main]        # or [master] — match the repo's default branch
+    branches: [main]        # or [master]: match the repo's default branch
   pull_request:
     branches: [main]
 jobs:
@@ -379,9 +379,9 @@ describe("API → UI invariant", () => {
 ### Naming Convention
 
 Name invariant tests after the boundary they guard:
-- `pipeline-locations.test.ts` — pipeline to database shape
-- `price-display.test.ts` — API response to UI formatting
-- `planner.test.ts` — database query assumptions
+- `pipeline-locations.test.ts`: pipeline to database shape
+- `price-display.test.ts`: API response to UI formatting
+- `planner.test.ts`: database query assumptions
 
 ### Common Patterns Across Projects
 
@@ -444,12 +444,12 @@ google-chrome --headless --disable-gpu --no-sandbox \
 Parsing test runner output with `grep` to determine pass/fail is fragile. A test suite that passes but has a test _named_ "handles errors" or prints "0 failed" will match the wrong pattern and flip your result.
 
 ```bash
-# WRONG — a passing test named "handles errors" matches the grep and RESULT=FAIL
+# WRONG: a passing test named "handles errors" matches the grep and RESULT=FAIL
 if npm test 2>&1 | grep -qi "error\|fail"; then
   RESULT="FAIL"
 fi
 
-# RIGHT — use the actual exit code; output is only for human-readable detail
+# RIGHT: use the actual exit code; output is only for human-readable detail
 TEST_EXIT=0
 TEST_OUTPUT=$(npm test 2>&1) || TEST_EXIT=$?
 if [ "$TEST_EXIT" -ne 0 ]; then
@@ -469,13 +469,13 @@ Single-quoted globs like `'test/**/*.test.js'` do NOT expand on GitHub Actions b
 
 **Fix:** Use a flat glob (`test/*.test.js`) or let the test framework handle the pattern:
 ```yaml
-# BAD — glob not expanded, tests silently skipped
+# BAD: glob not expanded, tests silently skipped
 run: npx jest 'test/**/*.test.js'
 
-# GOOD — flat glob, works everywhere
+# GOOD: flat glob, works everywhere
 run: npx jest test/*.test.js
 
-# GOOD — let jest find tests via config
+# GOOD: let jest find tests via config
 run: npx jest
 ```
 
@@ -545,13 +545,13 @@ it('returns focus to trigger on Escape', async () => {
 When validating numeric values parsed from external input (webhook payloads, API responses, database records, user data), `!x` and `x === 0` guards do NOT reject negative numbers; JS treats negatives as truthy.
 
 ```javascript
-// WRONG — passes -100 through because !(-100) is false
+// WRONG: passes -100 through because !(-100) is false
 function computePace(distanceM, durationSec) {
   if (!distanceM || !durationSec || distanceM === 0) return undefined;
   return durationSec / (distanceM / 1000);  // returns -12.5 for duration=-100
 }
 
-// RIGHT — rejects non-positive values for physical quantities
+// RIGHT: rejects non-positive values for physical quantities
 function computePace(distanceM, durationSec) {
   if (!distanceM || !durationSec || distanceM <= 0 || durationSec <= 0) return undefined;
   return durationSec / (distanceM / 1000);
@@ -573,7 +573,7 @@ When a loop processes a batch (DB rows, files, API records) and each iteration r
 2. **Wrap each loop iteration** in try/catch + continue so one bad record is skipped, not fatal.
 
 ```javascript
-// WRONG — one malformed regex aborts ALL detection
+// WRONG: one malformed regex aborts ALL detection
 function detectAll(items, templates) {
   for (const tmpl of templates) {
     const re = new RegExp(tmpl.pattern);  // throws SyntaxError on bad pattern
@@ -581,7 +581,7 @@ function detectAll(items, templates) {
   }
 }
 
-// RIGHT — guard the throw; isolate per-item failures
+// RIGHT: guard the throw; isolate per-item failures
 function safeCompile(pattern) {
   try { return new RegExp(pattern); } catch { return null; }
 }

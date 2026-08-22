@@ -43,15 +43,15 @@ stop_hook_init "my-hook-name" --invokes-claude
 
 ### What the guard library provides:
 
-1. **Env var circuit breaker** — Exports `CLAUDE_HOOK_<NAME>=1` before invoking Claude. Checks it at entry and exits if set. Prevents the hook from firing on sessions it spawned.
+1. **Env var circuit breaker**: Exports `CLAUDE_HOOK_<NAME>=1` before invoking Claude. Checks it at entry and exits if set. Prevents the hook from firing on sessions it spawned.
 
-2. **Lockfile** — PID-based lockfile in `/tmp/claude-hook-locks/`. Prevents concurrent execution of the same hook. Auto-cleaned via trap.
+2. **Lockfile**: PID-based lockfile in `/tmp/claude-hook-locks/`. Prevents concurrent execution of the same hook. Auto-cleaned via trap.
 
-3. **Rate limiter** — Per-hook invocation counter in `/tmp/claude-hook-rates/`. Default: max 5 invocations per hour. Pruned automatically.
+3. **Rate limiter**: Per-hook invocation counter in `/tmp/claude-hook-rates/`. Default: max 5 invocations per hour. Pruned automatically.
 
 ### Additional safeguards the hook author must implement:
 
-4. **Content fingerprinting** — Grep the conversation for the hook's own prompt signature. The env var guard can fail if the shell doesn't inherit env vars; this is the fallback.
+4. **Content fingerprinting**: Grep the conversation for the hook's own prompt signature. The env var guard can fail if the shell doesn't inherit env vars; this is the fallback.
 
 ```bash
 CONVERSATION=$(echo "$HOOK_INPUT" | jq -r '.last_assistant_message // empty')
@@ -60,9 +60,9 @@ if printf '%s' "$CONVERSATION" | grep -q 'my unique prompt marker'; then
 fi
 ```
 
-5. **Minimum conversation length** — Skip trivial sessions (quick Q&A, accidental exits). A 200-char minimum is a good default.
+5. **Minimum conversation length**: Skip trivial sessions (quick Q&A, accidental exits). A 200-char minimum is a good default.
 
-6. **Background execution** — The Claude invocation must run in background so the hook doesn't block session exit:
+6. **Background execution**: The Claude invocation must run in background so the hook doesn't block session exit:
 
 ```bash
 (
@@ -73,7 +73,7 @@ fi
 exit 0
 ```
 
-7. **Subprocess timeout** — Always wrap `claude -p` in `timeout 60` (or similar). A hung Claude session should not persist indefinitely.
+7. **Subprocess timeout**: Always wrap `claude -p` in `timeout 60` (or similar). A hung Claude session should not persist indefinitely.
 
 ## Template: Tier 3 Hook
 

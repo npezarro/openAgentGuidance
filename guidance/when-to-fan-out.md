@@ -5,13 +5,13 @@ Guidance for autonomous loops and interactive sessions on when to spawn subagent
 
 ## The three primitives, and where each applies
 
-1. **In-session Task fan-out** — a single `claude -p` session spawns subagents via the Task tool. Works in headless `--dangerously-skip-permissions` sessions. Use the Task tool with an INLINE role description; do not rely on a custom agentType name resolving in headless mode. This is the only fan-out available to a cron `claude -p` loop.
-2. **Bash-level parallelism** — `&` + `wait -n` throttle, or `xargs -P`. Use when a loop calls `claude -p` (or any subprocess) once per independent item. Cron-friendly, no SDK needed.
-3. **Workflow tool** — deterministic multi-agent orchestration (fan-out, pipeline, adversarial verify, synthesize). Runs inside an interactive/SDK session, NOT a bare cron `claude -p`. Use for interactive heavy work (deep review, multi-source research, migrations).
+1. **In-session Task fan-out**: a single `claude -p` session spawns subagents via the Task tool. Works in headless `--dangerously-skip-permissions` sessions. Use the Task tool with an INLINE role description; do not rely on a custom agentType name resolving in headless mode. This is the only fan-out available to a cron `claude -p` loop.
+2. **Bash-level parallelism**: `&` + `wait -n` throttle, or `xargs -P`. Use when a loop calls `claude -p` (or any subprocess) once per independent item. Cron-friendly, no SDK needed.
+3. **Workflow tool**: deterministic multi-agent orchestration (fan-out, pipeline, adversarial verify, synthesize). Runs inside an interactive/SDK session, NOT a bare cron `claude -p`. Use for interactive heavy work (deep review, multi-source research, migrations).
 
 ## Fan out when
 
-- **An independent claim needs an independent check.** Before a loop reports "fixed / passing / works" — especially a loop that self-merges or deploys — spawn a verifier subagent that RE-RUNS the falsifying command and tries to refute. Verify before asserting; test before reporting. A skeptic with fresh context catches what the author rationalized.
+- **An independent claim needs an independent check.** Before a loop reports "fixed / passing / works", especially a loop that self-merges or deploys: spawn a verifier subagent that RE-RUNS the falsifying command and tries to refute. Verify before asserting; test before reporting. A skeptic with fresh context catches what the author rationalized.
 - **N genuinely independent items are processed one at a time.** A `for item in list; do claude -p ...; done` where items do not depend on each other (per-PR reviews, per-item generation, per-repo audits). Parallelize the expensive calls; keep shared-state writes serial.
 - **A finding touches 3+ repos, architecture, or security.** Spawn a deep-analysis subagent to trace the full impact chain before acting.
 - **A decision benefits from diverse perspectives.** Spawn architect/reviewer/qa/security specialists in parallel on the same artifact, then synthesize.
@@ -33,7 +33,7 @@ Parallel agents must never share non-atomic state. If a loop writes a JSON state
 
 ## Node.js subprocess parallelism gotcha: `execSync` blocks
 
-When parallelizing `claude -p` calls from Node.js, use **non-blocking `spawn`**, not `execSync`. `execSync` is synchronous — it blocks the Node.js event loop until the subprocess exits. Wrapping it in `Promise.all` gives NO actual parallelism; calls still run serially despite the async appearance.
+When parallelizing `claude -p` calls from Node.js, use **non-blocking `spawn`**, not `execSync`. `execSync` is synchronous: it blocks the Node.js event loop until the subprocess exits. Wrapping it in `Promise.all` gives NO actual parallelism; calls still run serially despite the async appearance.
 
 **Wrong (serial despite Promise.all):**
 ```js
@@ -78,7 +78,7 @@ A fan-out that asks "which of these N approaches works?" produces confident-soun
 
 1. **Every claimed success gets an adversarial re-run** by an agent instructed to *refute* it, from scratch, using only the reported reproduction command. Default to REFUTED when it cannot be reproduced. (Same rule as above, applied to technique discovery rather than to bug fixes.)
 
-2. **Require a negative control in the agent's brief.** Ask explicitly: *what is the cheapest change that should NOT work, and does it in fact not work?* Without it you learn "X worked" but not "X worked *because of Y*" — and only the second lets you build on it.
+2. **Require a negative control in the agent's brief.** Ask explicitly: *what is the cheapest change that should NOT work, and does it in fact not work?* Without it you learn "X worked" but not "X worked *because of Y*", and only the second lets you build on it.
 
 > A fan-out testing ~20 approaches against an anti-automation wall returned dozens of verified successes. The single most valuable output was not a technique. A verifier ran the control that had been skipped, changing only the client identification string, same IP, same moment, and showed the wall came back byte-identical, while a different client-fingerprint approach returned a real page. That is what identified the transport-layer fingerprint as the mechanism. Without it there was a working trick and no model, and the wrong abstraction (a per-host profile map that later evidence showed would rot silently) would have been built on top of it.
 

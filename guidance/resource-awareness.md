@@ -12,10 +12,10 @@ Server specs change (VMs get resized, processes get added, disk fills up). Never
 Run these checks before starting builds, installs, large file operations, or anything CPU/memory-intensive:
 
 ```bash
-# Memory — is there enough for a build?
+# Memory: is there enough for a build?
 free -m
 
-# Disk — is there room for node_modules, build output, logs?
+# Disk: is there room for node_modules, build output, logs?
 df -h
 
 # What's already running? How many processes, how much memory?

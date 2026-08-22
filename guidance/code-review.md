@@ -76,11 +76,11 @@ Unless the user explicitly requests a single review pass, use the iterative revi
 
 ### How it works
 
-1. **Implement** — Make the requested changes, run tests, commit.
-2. **Review (round 1)** — Spawn 2-3 parallel reviewer agents. Each agent audits the diff independently, categorizing findings as Critical / Important / Minor / Deferred.
-3. **Fix & commit** — Address all Critical and Important findings. Commit the fixes.
-4. **Review (round 2)** — Spawn fresh reviewer agents on the updated code. Reviewers must not see prior review output; they audit with fresh eyes. This catches regressions introduced by the fixes and surfaces issues the first round missed.
-5. **Repeat** — If round 2 produces Critical or Important findings, fix and run another round. Stop when a review round returns clean (no Critical/Important findings). Minor and Deferred items can be noted but don't block.
+1. **Implement**: Make the requested changes, run tests, commit.
+2. **Review (round 1)**: Spawn 2-3 parallel reviewer agents. Each agent audits the diff independently, categorizing findings as Critical / Important / Minor / Deferred.
+3. **Fix & commit**: Address all Critical and Important findings. Commit the fixes.
+4. **Review (round 2)**: Spawn fresh reviewer agents on the updated code. Reviewers must not see prior review output; they audit with fresh eyes. This catches regressions introduced by the fixes and surfaces issues the first round missed.
+5. **Repeat**: If round 2 produces Critical or Important findings, fix and run another round. Stop when a review round returns clean (no Critical/Important findings). Minor and Deferred items can be noted but don't block.
 
 ### Why this is the default
 
@@ -229,9 +229,9 @@ When bash scripts use `head -c N` or `head -n N` to limit command output before 
 
 When a prompt specifies a strict output format (e.g., "ONLY valid JSON", "no markdown fences", "no explanation"), enforce it before submitting:
 
-1. **Parse the constraint first** — read the format requirement exactly.
-2. **Validate before submitting** — after writing the response, check it against the constraint.
-3. **Fix, don't annotate** — if a violation is found: STOP, regenerate correctly. Never submit both the violation and a self-diagnosis of it.
+1. **Parse the constraint first**: read the format requirement exactly.
+2. **Validate before submitting**: after writing the response, check it against the constraint.
+3. **Fix, don't annotate**: if a violation is found: STOP, regenerate correctly. Never submit both the violation and a self-diagnosis of it.
 
 **Common violations:** wrapping JSON in fences when told not to; adding explanatory text when told "no explanation"; submitting a self-diagnosis inside the violating output.
 

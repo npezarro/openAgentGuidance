@@ -88,10 +88,10 @@ fi
 When creating PRs via the GitHub REST API (Octokit) rather than `gh pr create`, the `head` parameter must be fully qualified as `owner:branch`, not just `branch`.
 
 ```js
-// WRONG — causes "invalid head" errors, especially on newly-pushed branches
+// WRONG: causes "invalid head" errors, especially on newly-pushed branches
 await octokit.rest.pulls.create({ head: branch, ... });
 
-// CORRECT — qualify with the repo owner
+// CORRECT: qualify with the repo owner
 await octokit.rest.pulls.create({ head: `${owner}:${branch}`, ... });
 ```
 
