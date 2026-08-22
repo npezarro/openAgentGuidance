@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# public-metadata-guard.sh — PreToolUse (Bash) gate for GitHub text that is
+# public-metadata-guard.sh: PreToolUse (Bash) gate for GitHub text that is
 # published without ever passing through git.
 #
 # The commit path is now gated three ways (pre-commit on content, commit-msg on

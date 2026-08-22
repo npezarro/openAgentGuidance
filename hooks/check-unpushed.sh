@@ -54,7 +54,7 @@ while IFS=$'\t' read -r repo_root file_path _epoch; do
   repo_name=$(basename "$repo_root")
   # Label a worktree by its PROJECT, not by the worktree directory name: "probe (1)"
   # tells you nothing about which repo has stranded work. Checks still run against the
-  # worktree itself — only the display name is resolved through the common git dir.
+  # worktree itself: only the display name is resolved through the common git dir.
   if [ -f "$repo_root/.git" ]; then
     _common=$(cd "$repo_root" && git rev-parse --git-common-dir 2>/dev/null || echo "")
     case "$_common" in
@@ -94,7 +94,7 @@ while IFS=$'\t' read -r repo_root file_path _epoch; do
     CHECKED_REPOS[$repo_root]=1
     # A branch with no upstream is NOT automatically safe. A per-session git worktree
     # (guidance/concurrent-sessions.md) starts on a fresh local branch, so `@{u}` fails
-    # and the old code skipped the unpushed check entirely — a session could commit in a
+    # and the old code skipped the unpushed check entirely: a session could commit in a
     # worktree, never merge, and stop with the gate completely silent. Verified
     # 2026-08-02: empty output, exit 0, on a committed-but-unmerged file.
     #

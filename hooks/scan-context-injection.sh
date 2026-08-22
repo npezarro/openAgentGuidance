@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scan-context-injection.sh — SessionStart hook that scans project context files
+# scan-context-injection.sh: SessionStart hook that scans project context files
 # for prompt injection patterns before the agent trusts their instructions.
 # Inspired by Hermes Agent's context file injection safety scanner.
 #

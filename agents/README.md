@@ -5,14 +5,14 @@ Version-controlled copies of the custom subagent definitions that live at `~/.cl
 Each `<name>.md` defines a specialist subagent (frontmatter `name` + `description`, optional `model`, optional `allowed-tools`, then the system prompt). Definitions are self-contained: no external persona or state files.
 
 ## Current agents
-- **architect** — system design, architecture decisions, migration planning
-- **debugger** — bug hunting, error analysis, root cause
-- **doc-sync** — CLAUDE.md freshness / documentation drift
-- **propagation** — routes learnings to all destinations
-- **quick-search** — fast cheap codebase search (Haiku-pinned)
-- **reviewer** — code review and security audit
-- **security** — threat modeling, auth, secrets hygiene, hardening
-- **verifier** — independent skeptic that refutes "it works / fixed / passing" claims before they are reported or merged
+- **architect**: system design, architecture decisions, migration planning
+- **debugger**: bug hunting, error analysis, root cause
+- **doc-sync**: CLAUDE.md freshness / documentation drift
+- **propagation**: routes learnings to all destinations
+- **quick-search**: fast cheap codebase search (Haiku-pinned)
+- **reviewer**: code review and security audit
+- **security**: threat modeling, auth, secrets hygiene, hardening
+- **verifier**: independent skeptic that refutes "it works / fixed / passing" claims before they are reported or merged
 
 ## Sync (mirrors the claude-skills pattern)
 Edit in this repo, then copy to the active location, commit, and push here for history:

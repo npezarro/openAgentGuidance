@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# secret-scan.sh — deterministic gate for secrets and private identifiers.
+# secret-scan.sh: deterministic gate for secrets and private identifiers.
 #
 # The git hooks in hooks/ call this. It ships with working defaults so the gate
 # is live the moment you install it: a hook whose scanner is missing prints a

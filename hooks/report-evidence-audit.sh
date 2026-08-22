@@ -64,6 +64,6 @@ fi
 [ -z "$VIOLATION" ] && exit 0
 
 touch "$MARKER"
-REASON="REPORT-EVIDENCE GATE: your final message ${VIOLATION}. The reader sees only this final message — they do not see the session that produced it. Revise the final message so that every claimed piece of evidence is physically present in it: re-run the check if needed and paste the verbatim output inside a fenced code block, or rewrite the claim to match what is actually shown. Do not add new scope; only make the report match the evidence."
+REASON="REPORT-EVIDENCE GATE: your final message ${VIOLATION}. The reader sees only this final message: they do not see the session that produced it. Revise the final message so that every claimed piece of evidence is physically present in it: re-run the check if needed and paste the verbatim output inside a fenced code block, or rewrite the claim to match what is actually shown. Do not add new scope; only make the report match the evidence."
 jq -n --arg r "$REASON" '{decision: "block", reason: $r}'
 exit 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-repo-writer.sh — PostToolUse (Edit|Write) hook that warns when a write
+# check-repo-writer.sh: PostToolUse (Edit|Write) hook that warns when a write
 # lands in a repo that declares another copy as canonical, or an autonomous
 # agent as its writer-of-record.
 #

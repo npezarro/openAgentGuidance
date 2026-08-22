@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stop-hook-guard.sh — Shared guard library for Stop hooks.
+# stop-hook-guard.sh: Shared guard library for Stop hooks.
 # Source this at the top of any Stop hook to get standardized safety checks.
 #
 # Usage:
@@ -10,15 +10,15 @@
 #   stop_hook_init "my-hook-name" --invokes-claude
 #
 # Available after init:
-#   HOOK_INPUT     — raw stdin content (JSON from hook framework)
-#   SESSION_ID     — session ID
-#   TRANSCRIPT     — path to transcript file
-#   HOOK_LOCKDIR   — /tmp/claude-hook-locks
+#   HOOK_INPUT    : raw stdin content (JSON from hook framework)
+#   SESSION_ID    : session ID
+#   TRANSCRIPT    : path to transcript file
+#   HOOK_LOCKDIR  : /tmp/claude-hook-locks
 #
 # Functions:
-#   stop_hook_init        — run all guards, exit early if unsafe
-#   stop_hook_cleanup     — release lock (called automatically via trap)
-#   stop_hook_rate_ok     — check per-hour invocation rate (returns 0/1)
+#   stop_hook_init       : run all guards, exit early if unsafe
+#   stop_hook_cleanup    : release lock (called automatically via trap)
+#   stop_hook_rate_ok    : check per-hour invocation rate (returns 0/1)
 
 set -uo pipefail
 

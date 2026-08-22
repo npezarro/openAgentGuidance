@@ -5,7 +5,7 @@
 ```
 <type>: <what changed and why>
 
-<optional body — more detail if needed>
+<optional body: more detail if needed>
 ```
 
 ## Types

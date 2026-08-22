@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — wire this guidance repo into Claude Code.
+# install.sh: wire this guidance repo into Claude Code.
 #
 # Idempotent. Prints what it will change, backs up anything it touches, and can
 # be re-run after a `git pull` without duplicating hooks.

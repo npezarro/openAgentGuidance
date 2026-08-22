@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claim-guard.sh <warn|deny> — cross-session write-collision guard.
+# claim-guard.sh <warn|deny>: cross-session write-collision guard.
 #
 # The problem it fixes (2026-07-17 and again 2026-07-30): several Claude sessions run
 # in the same ~/repos checkout with --dangerously-skip-permissions, and nothing tells
@@ -12,10 +12,10 @@
 # owned by an agent". Neither answers "is another session writing THIS path right now".
 #
 # Two modes:
-#   warn  (PostToolUse Edit|Write|Bash) — advisory. Names the other live session, the
+#   warn  (PostToolUse Edit|Write|Bash): advisory. Names the other live session, the
 #         path, and how stale your read may be. Deduped so each collision is reported
 #         once per session.
-#   deny  (PreToolUse Bash) — blocks only the blast-radius commands, the ones that take
+#   deny  (PreToolUse Bash): blocks only the blast-radius commands, the ones that take
 #         another session's uncommitted work with them:
 #           git add -A / --all / .
 #           git commit -a / -am / --all
@@ -260,7 +260,7 @@ deny() {  # $1 = target label, $2 = detail line
   fi
   log_event "deny" "$1: $KIND"
   cat >&2 <<EOF
-CLAIM GUARD: blocked \`${KIND}\` — ${1} is also being written by another LIVE session right now.
+CLAIM GUARD: blocked \`${KIND}\`: ${1} is also being written by another LIVE session right now.
 ${2}
 ${FIX}
 This command would sweep their uncommitted work into your commit (or delete files they are still writing). It is the exact failure from 2026-07-17.

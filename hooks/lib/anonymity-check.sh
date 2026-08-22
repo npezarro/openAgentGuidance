@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# anonymity-check.sh — shared checks for anything a PUBLIC repo publishes.
+# anonymity-check.sh: shared checks for anything a PUBLIC repo publishes.
 #
 # A repo publishes more than its diff: commit messages, PR titles and bodies,
 # issue text, release notes. Each of those is a separate write path, and each

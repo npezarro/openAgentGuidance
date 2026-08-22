@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# write-target-inference.sh — shared helpers for inferring which repo files a Bash
+# write-target-inference.sh: shared helpers for inferring which repo files a Bash
 # command writes. Sourced by track-repo-writes.sh (to record own writes) and
 # claim-guard.sh (to check them against other live sessions).
 #
@@ -44,7 +44,7 @@ wti_is_write_cmd() {
 # from a variable assigned in an earlier turn stays unresolved and callers must handle it.
 wti_expand() {
   local p="$1" cmd="${2:-}" asg name val
-  # `R=~/repos/x; cd $R && git add -A` — resolve R from the command itself.
+  # `R=~/repos/x; cd $R && git add -A`: resolve R from the command itself.
   if [ -n "$cmd" ]; then
     case "$p" in
       *'$'*)

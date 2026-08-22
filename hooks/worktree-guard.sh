@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# worktree-guard.sh — PreToolUse (Edit|Write). Enforces per-session git worktrees at the
+# worktree-guard.sh: PreToolUse (Edit|Write). Enforces per-session git worktrees at the
 # only moment enforcement can still help: the FIRST write to a contested repo.
 #
 # Why not a Stop hook (asked 2026-08-02): by Stop time the editing already happened in the
-# shared checkout, so blocking the stop cannot retroactively isolate anything — there is no
+# shared checkout, so blocking the stop cannot retroactively isolate anything: there is no
 # remediation left, only nagging. Worse, Stop cannot distinguish "correctly skipped a
 # worktree" (read-only work, ops, one-file edits, all explicitly exempt in agent.md) from
 # "forgot", so it would fire on both and train reflexive acks, which is how a guard stops
@@ -53,7 +53,7 @@ esac
 
 # Overridable so a test can point at an isolated fixture. Without this the suite has to
 # use a real ~/repos checkout, where genuinely live sessions hold the ledgers and the
-# fixture cannot control the peer set — four cases "failed" that way on first run, and the
+# fixture cannot control the peer set: four cases "failed" that way on first run, and the
 # hook was correct every time.
 GUARD_ROOT="${WORKTREE_GUARD_ROOT:-$HOME/repos}"
 case "$FP" in

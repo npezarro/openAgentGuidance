@@ -77,7 +77,7 @@ jobs:
           fi
 
           if [ "$viol" -ne 0 ]; then
-            echo "::error::Public content scan FAILED. Content is ALREADY PUBLIC — treat as an incident, not a build failure: scrub the file, then assume the old content was fetched."
+            echo "::error::Public content scan FAILED. Content is ALREADY PUBLIC: treat as an incident, not a build failure: scrub the file, then assume the old content was fetched."
             exit 1
           fi
           echo "Public content scan passed."

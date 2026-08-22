@@ -28,8 +28,8 @@ gh pr create --title "Short descriptive title" --body "$(cat <<'EOF'
 - Added X to improve Y
 
 ## Changes
-- `src/module.js` — new validation logic
-- `tests/module.test.js` — regression test
+- `src/module.js`: new validation logic
+- `tests/module.test.js`: regression test
 
 ## Testing
 - [x] Build passes

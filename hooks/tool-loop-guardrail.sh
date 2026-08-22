@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tool-loop-guardrail.sh — PostToolUse hook that detects repeated identical tool calls.
+# tool-loop-guardrail.sh: PostToolUse hook that detects repeated identical tool calls.
 # Programmatic enforcement of ESSENTIAL rule #12 (time-box approach switching).
 # Inspired by Hermes Agent's tool_guardrails.py fingerprinting system.
 #
