@@ -46,7 +46,7 @@ Below are three filled-in examples based on different project types. Use them as
 ```markdown
 # Context: my-discord-bot
 
-Last Updated: 2026-03-10: Wired metrics instrumentation, added backup cron, thread auto-archiving
+Last Updated: 2026-03-10. Wired metrics instrumentation, added backup cron, thread auto-archiving
 
 ## Current State
 - Bot is **online** via PM2
@@ -92,7 +92,7 @@ data/
 
 ```markdown
 # context.md
-Last Updated: 2026-03-06: Fixed blank page and added geocoding fallback
+Last Updated: 2026-03-06. Fixed blank page and added geocoding fallback
 
 ## Current State
 - App is live at example.com/myapp
@@ -126,7 +126,7 @@ claude/fix-blank-page
 
 ```markdown
 # context.md
-Last Updated: 2026-03-08: Initial build of private CLI tool
+Last Updated: 2026-03-08. Initial build of private CLI tool
 
 ## Current State
 - All CLI commands functional: `check-links`, `scrape`, `discover`, `enrich`, `full`

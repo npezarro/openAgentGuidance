@@ -28,7 +28,7 @@ Below are example log sections from different project types. Use them as referen
 
 ---
 
-### Example 1: Discord Bot: Active Development
+### Example 1: Discord Bot (Active Development)
 
 Shows a mix of features, fixes, deploys, and documentation entries over a week of development.
 
@@ -59,7 +59,7 @@ Shows a mix of features, fixes, deploys, and documentation entries over a week o
 
 ---
 
-### Example 2: Guidance/Documentation Repo: Slow-Burn Maintenance
+### Example 2: Guidance/Documentation Repo (Slow-Burn Maintenance)
 
 Shows a docs-heavy repo with PRs, refactors, and occasional features.
 
@@ -83,7 +83,7 @@ Shows a docs-heavy repo with PRs, refactors, and occasional features.
 
 ---
 
-### Example 3: CLI Tool: Early Stage
+### Example 3: CLI Tool (Early Stage)
 
 Shows a project in its first days with just a few entries.
 

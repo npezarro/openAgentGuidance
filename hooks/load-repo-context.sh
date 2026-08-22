@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# load-repo-context.sh: SessionStart hook: load context for the repo you're
+# load-repo-context.sh: SessionStart hook that loads context for the repo you're
 # actually standing in (review proposal 7.4, tiered context).
 #
 # Tier 0 (global) is the existing always-loaded set. This hook adds Tier 1:

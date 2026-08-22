@@ -260,7 +260,7 @@ deny() {  # $1 = target label, $2 = detail line
   fi
   log_event "deny" "$1: $KIND"
   cat >&2 <<EOF
-CLAIM GUARD: blocked \`${KIND}\`: ${1} is also being written by another LIVE session right now.
+CLAIM GUARD: blocked \`${KIND}\`, ${1} is also being written by another LIVE session right now.
 ${2}
 ${FIX}
 This command would sweep their uncommitted work into your commit (or delete files they are still writing). It is the exact failure from 2026-07-17.
