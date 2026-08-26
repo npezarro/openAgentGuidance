@@ -37,7 +37,7 @@ Wire `--check` into CI so a new guidance file cannot land undiscoverable. A file
 | `guidance/secrets-hygiene.md` | secret rotation, history rewrite, detection patterns |
 | `guidance/stop-hook-safety.md` | tiered stop hook classification, guard library, Tier 3 recursion prevention |
 | `guidance/testing.md` | writing and running tests, cross-layer invariants |
-| `guidance/when-to-fan-out.md` | deciding whether to spawn subagents (Task fan-out / parallel bash / Workflow) vs stay single-agent; concurrency-safe 3-phase pattern |
+| `guidance/when-to-fan-out.md` | when to spawn subagents (Task fan-out / parallel bash / Workflow) vs stay single-agent; concurrency-safe 3-phase pattern |
 <!-- END GENERATED -->
 
 ## Other components
