@@ -29,9 +29,9 @@ a unit that predates the window contributes its whole pre-window history to the
 denominator and nothing to the numerator. So the deficit concentrates in
 long-lived units.
 
-If your segmentation variable correlates with age, and "multi-turn vs
+If your segmentation variable correlates with age (and "multi-turn vs
 single-turn", "active vs idle", "power user vs new user", "long-running job vs
-one-shot" all do, the artifact arrives pre-packaged as a plausible mechanism:
+one-shot" all do), the artifact arrives pre-packaged as a plausible mechanism:
 
 > "It fires reliably on the first event and unreliably after."
 
@@ -92,9 +92,9 @@ One experiment had two metrics reading the same event set:
 | demand ("was it ever wanted?") | the log's global window | a fact about the user, not the retriever; the stricter floor **under-counts** it |
 
 The recall bound raises the number. The demand bound raises it too, and the
-decision rule ships when demand is zero, so tightening demand would have pushed
-toward shipping on an artifact. **State each metric's bias direction out loud
-before choosing its bound.**
+decision rule shipped when demand was zero, so tightening demand would have
+pushed toward shipping on an artifact. **State each metric's bias direction out
+loud before choosing its bound.**
 
 ## The freeze protects the collector, not the scorer
 
@@ -126,9 +126,9 @@ Before reporting a coverage or recall figure:
    If yes, suspect censoring before suspecting the collector.
 5. In any per-unit join, are both sides bounded by the same window?
 6. Are the residual misses real events, or harness artifacts? (For prompt
-   collectors: session-compaction and session-clear commands, command-name
-   expansions, and continuation summaries appear as `type:user` but never fire a
-   prompt-submit hook.)
+   collectors: context-clearing and compaction commands, command-name
+   expansions, and continuation summaries can appear as user-type entries in a
+   transcript while never firing the prompt-submit event the collector hooks.)
 
 ## Worked example
 
@@ -136,11 +136,11 @@ Reported hook coverage was single-turn 102/102 = 100%, multi-turn 40/77 = 52%,
 read as "the hook fires on a session's first prompt and unreliably after" and
 logged as a validity threat.
 
-The log had been archived at a rig freeze partway through the observation period;
-the denominator counted every prompt in each session's transcript, including
-prompts from days before that. One session contributed 19 prompts and 1 record.
-Its other 6 records were in the rotated archives, and its first 2 prompts predated
-the hook's existence entirely.
+The log had been archived at an earlier rig freeze; the denominator counted every
+prompt in each session's transcript, including prompts from days before that
+freeze. One session contributed 19 prompts and 1 record. Its other 6 records were
+in two earlier rotated log files, and its first 2 prompts predated the hook's
+existence entirely.
 
 Corrected to the log's own window, per-prompt timestamp join across all 124
 transcripts: **153/153 = 100%**, single- and multi-turn alike. The 3 apparent
@@ -153,22 +153,24 @@ construction. Fixed in the scorer (reading moved 12% -> 25%, both printed); the
 collector was not touched, and recomputing the rig fingerprint from its declared
 inputs proved no record was invalidated and the window did not restart.
 
-### Differencing a weighted aggregate whose weights are re-derived each period lets composition masquerade as the measurement
+## Related failure: differencing a weighted aggregate whose weights are re-derived each period
 
 A level and a change need different estimators. Any weighted aggregate whose
 weights are recomputed each period (a volume-weighted average price, a
-traffic-weighted latency, a headcount-weighted score) CANNOT be differenced across
-periods to measure the thing it averages: you get the composition shift for free,
-and it is indistinguishable from real movement in the underlying components.
+traffic-weighted latency, a headcount-weighted score) CANNOT be differenced
+across periods to measure the thing it averages: you get the composition shift
+for free, and it is indistinguishable from real movement in the underlying
+components.
 
-Concrete case: a daily market narrative claimed "asking $/sqft is up 1%, sellers
+A concrete case: a daily market narrative claimed "asking $/sqft is up 1%, sellers
 still hold pricing power". The number differenced an active-weighted mean of four
-sub-market medians, weighted by each day's own listing counts. Over the reporting
-window the expensive sub-market (~$810/sqft) added 21 listings while the cheap one
-(~$665) did not. Measured against 29 real daily snapshots: the fixed-weight move
-was EXACTLY 0.00% while the shipped number said +1%. Across 22 windows the value
-was wrong on 5, and the qualitative claim fired or vanished on 3. The bias is not
-one-directional: on two other windows the mix shift MASKED a genuine ~0.4% decline.
+sub-market medians, weighted by each day's own listing counts. Over the window in
+question the expensive sub-market (~$810/sqft) added 21 listings while the cheap
+one (~$665) did not. Measured against 29 real daily snapshots, the fixed-weight
+move was EXACTLY 0.00% while the shipped number said +1%. Across 22 windows the
+value was wrong on 5, and the qualitative claim fired or vanished on 3. The bias
+is not one-directional: on two other windows the mix shift MASKED a genuine ~0.4%
+decline.
 
 Diagnostic question, cheap to ask: what happens to this number if every component
 holds perfectly still and only the weights move? If the answer is "it moves", the
@@ -178,12 +180,49 @@ Fix shape: a fixed-weight (Laspeyres) index. Weight BOTH endpoints by the same
 base-period weights and restrict to components present in both periods, so only a
 component's own value can move the result. Keep the re-weighted aggregate for the
 LEVEL (that is a legitimate use) and change only the DELTA. Two traps worth
-noting: (1) renaming the statistic does not fix it, a true pooled median
+noting: (1) renaming the statistic does not fix it, since a true pooled median
 differenced across periods has the identical flaw, because the pool composition
 also shifts; (2) scope the fix by MEASURING sibling statistics rather than fixing
-them on principle, the sibling "average days on market" metric here had the same
-shape but its worst pure-mix swing was 1 unit against a 5-unit reporting
-threshold, so it was correctly left alone with the reasoning recorded.
+them on principle: a sibling "average days on market" metric had the same shape,
+but its worst pure-mix swing was 1 unit against a 5-unit reporting threshold, so
+it was correctly left alone with the reasoning recorded.
 
 Also: `Math.round()` on a small negative value returns `-0`, which fails
 `strictEqual` against `0`. Normalize before returning a rounded percentage.
+
+## Related failure: a timeout that kills a scan mid-list yields partial data that reads as complete data
+
+`$(timeout N ./scan.sh || echo 'failed')` does NOT discard the killed process's
+output. Command substitution keeps whatever the process already wrote to stdout,
+then appends the fallback string. If the scan emits a list incrementally, the
+caller receives a well-formed list that simply stops wherever the clock ran out,
+with an error line underneath it that is easy to read past.
+
+This is worse than an empty result, because downstream logic treats
+absence-from-the-list as a positive fact. In one dedup gate, the truncated list
+was injected under "DO NOT create PRs for any work listed below, creating a
+duplicate is a critical failure", so "repo not in the list" silently meant "repo
+has no open branches". The scan had grown to ~87s against a 60s timeout; all 22
+retained work items were affected and 7 of them showed zero open branches,
+asserting a clean slate.
+
+Fail closed instead:
+
+1. Have the producer emit a completion sentinel from exactly ONE place, as its
+   final output (`<!-- SCAN_COMPLETE ... -->`).
+2. Have the consumer REQUIRE that sentinel and discard partial output WHOLE,
+   substituting an explicit "no data, here is how to get it yourself" block.
+   Never show partial results that read as authoritative.
+3. Report unreachable items as NOT SCANNED rather than skipping them. A skipped
+   item is indistinguishable from a clean one. Doing this surfaced two repos with
+   no git remote at all that had been counted as clean for months.
+4. Never compute a threshold decision (a cap, a quota, an alert) from an
+   incomplete scan.
+5. Prefer making the scan faster (parallel fan-out took it from 87s to 7.7s) over
+   raising the timeout. Growth in the input list is what breaks these, and it
+   will grow again.
+
+Detection: a runner whose failure line appears at the BOTTOM of a long block is
+structurally easy to miss. Also note that a per-run "Nth consecutive failure"
+tally can badly undercount, because each run only sees its own truncated
+evidence.

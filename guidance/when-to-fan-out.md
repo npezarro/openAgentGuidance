@@ -12,7 +12,7 @@ Guidance for autonomous loops and interactive sessions on when to spawn subagent
 ## Fan out when
 
 - **An independent claim needs an independent check.** Before a loop reports "fixed / passing / works", especially a loop that self-merges or deploys: spawn a verifier subagent that RE-RUNS the falsifying command and tries to refute. A skeptic with fresh context catches what the author rationalized.
-- **N genuinely independent items are processed one at a time.** A `for item in list; do claude -p ...; done` where items do not depend on each other (per-PR reviews, per-document generation, per-channel analysis, per-repo audits). Parallelize the expensive calls; keep shared-state writes serial.
+- **N genuinely independent items are processed one at a time.** A `for item in list; do claude -p ...; done` where items do not depend on each other (per-PR reviews, per-item generation, per-repo audits). Parallelize the expensive calls; keep shared-state writes serial.
 - **A finding touches 3+ repos, architecture, or security.** Spawn a deep-analysis subagent to trace the full impact chain before acting.
 - **A decision benefits from diverse perspectives.** Spawn architect/reviewer/qa/security specialists in parallel on the same artifact, then synthesize.
 
@@ -80,7 +80,7 @@ A fan-out that asks "which of these N approaches works?" produces confident-soun
 
 2. **Require a negative control in the agent's brief.** Ask explicitly: *what is the cheapest change that should NOT work, and does it in fact not work?* Without it you learn "X worked" but not "X worked *because of Y*", and only the second lets you build on it.
 
-The lesson, from a run of 20 approaches with 37 verified successes: the single most valuable output was not a technique, it was the control that had been skipped. Re-running the cheapest variant alone, same host, same moment, returned a byte-identical response to the failure case, while a fuller client change returned a genuinely different response. That comparison identified the actual mechanism. Without it you have a working trick and no model, and you will build the wrong abstraction on top of it.
+> Lesson from a technique sweep: dozens of verified "successes" were less valuable than the one control run that had been skipped. Changing only the surface-level parameter, holding everything else constant, reproduced the failure byte-identically, while the full technique returned a real result. That contrast is what identified the actual mechanism. Without it there was a working trick and no model, and the wrong abstraction would have been built on top of it.
 
 Two failure modes to brief agents against explicitly:
 
@@ -91,7 +91,7 @@ Two failure modes to brief agents against explicitly:
 
 ## Persist what agents return
 
-A subagent's report exists in exactly one place: the tool result in your context. If you distill it into a smaller deliverable and let the raw report go out only in your chat response, **the detail is gone** the moment the turn ends. Chat is not storage. It is not greppable, diffable, or linkable, and a long response can be truncated in the live view. The predictable follow-up is "push those to a file for me to review", and by then the reports have to be reconstructed from context instead of read back from disk.
+A subagent's report exists in exactly one place: the tool result in your context. If you distill it into a smaller deliverable and let the raw report go out only in your chat response, **the detail is gone** the moment the turn ends. Chat is not storage. It is not greppable, diffable, or linkable, and a long response can be truncated in the live view.
 
 Rules:
 
@@ -102,25 +102,25 @@ Rules:
 
 ### Verify your change in an isolated git worktree when another session is mid-edit in the same checkout
 
-Multiple agent sessions can share one working tree per repo, so a repo-wide `npx tsc --noEmit` or `npm run build` can fail on files you never touched. Taking that at face value means either falsely reporting a broken build or committing someone else's work in progress.
+Multiple agent sessions can share one working tree per repo, so a repo-wide `npx tsc --noEmit` or `npm run build` can fail on files you never touched. Taking that at face value means either falsely reporting a broken build or committing someone else's WIP.
 
 Procedure when `git status` shows modified/untracked files you did not create:
 
 1. Attribute the errors first: `npx tsc --noEmit 2>&1 | grep -c <your-file>`. Zero hits means the failure is not yours.
-2. Verify in isolation: `git worktree add -b <branch> ../wt-<repo> origin/<default-branch>`, copy in only your file(s), then run tsc + build there.
-3. `node_modules` in the worktree must be a hardlink copy (`cp -al ../repo/node_modules node_modules`), NOT a symlink. Some bundlers reject a symlinked `node_modules` that points outside the filesystem root and die before compiling anything. The worktree must also live on the same filesystem as the source for `cp -al` to work.
+2. Verify in isolation: `git worktree add -b <branch> ~/wt-<repo> origin/<default-branch>`, copy in only your file(s), then run tsc + build there.
+3. `node_modules` in the worktree must be a hardlink copy (`cp -al ../repo/node_modules node_modules`, ~1s for a few hundred MB), NOT a symlink. Some bundlers panic with "Symlink [project]/node_modules is invalid, it points out of the filesystem root" and the build dies before compiling anything. The worktree also must live on the same filesystem as the source (under `$HOME`, not `/tmp`) for `cp -al` to work.
 4. Commit from the worktree, push, open the PR, then `git worktree remove --force` and `git branch -D`.
 5. Revert your leftover edits from the shared checkout afterwards (`git checkout -- <files>`) so the other session's `git add -A` cannot sweep a duplicate of your merged change into their commit.
 
-Also: do NOT deploy from a shared checkout in this state; a deploy builds from the local tree and would ship the other session's incomplete work.
+Also: do NOT deploy from a shared checkout in this state; a deploy that builds from the local tree would ship the other session's incomplete work.
 
 ### A research subagent that writes its report only at the end loses everything if it hits the output-token cap
 
-A subagent dispatched to produce a long research file can complete a hundred research tool calls and then die with an "exceeded the output token maximum" error before writing anything to disk. All of that work is lost, and the parent has no partial artifact to salvage.
+A subagent dispatched to produce a long research file can complete a hundred research tool calls, then die with "response exceeded the output token maximum" before writing anything to disk. All of that work is lost, and the parent has no partial artifact to salvage.
 
 Why: the agent batched its whole deliverable into one final Write (or a single oversized final message). The output cap applies per assistant response, so a large single write is the exact failure mode. A dead agent leaves no transcript the parent can cheaply recover; the parent should not read the subagent transcript (context overflow).
 
-How to apply: when dispatching a research subagent that must produce a long file, instruct it to (1) write the file INCREMENTALLY, creating it early with a skeleton then appending one section per Write/Edit call, and (2) keep its final return message short (under ~300 words), since the return value is not the deliverable. Then verify the file exists before relying on it. Also budget for relaunch: a usage guardrail may block respawning, so a single lost agent can become an unrecoverable gap mid-session. Prefer several narrowly-scoped agents over one broad one.
+How to apply: when dispatching a research subagent that must produce a long file, instruct it to (1) write the file INCREMENTALLY: create it early with a skeleton, then append one section per Write/Edit call; and (2) keep its final return message short (under ~300 words), since the return value is not the deliverable. Then verify the file exists before relying on it. Also budget for relaunch: a usage guardrail may block respawning, so a single lost agent can become an unrecoverable gap mid-session. Prefer several narrowly-scoped agents over one broad one.
 
 ### Do NOT infer subagent liveness from its transcript file; wait for the harness notification
 
@@ -139,7 +139,7 @@ What to do when a subagent's output is overdue:
 - Do NOT write the expected deliverable path yourself as a "status record" while the agent may still be running. It races the real agent (which then overwrites your file), and any watcher armed on that path fires on YOUR OWN write, which is easy to misread as the report arriving.
 - Never let a missing verdict silently become an implied one, but equally, never declare an agent dead without the harness saying so. Both are unfounded claims about state you did not observe. If you have already published a liveness claim that later proves wrong, retract it explicitly wherever it was published.
 
-### An unreturned verifier subagent must degrade to 'no verdict', never to a blocked session or an implied verdict
+### An unreturned verifier subagent must degrade to "no verdict", never to a blocked session or an implied verdict
 
 A spawned verifier/reviewer subagent that never returns is a THIRD outcome, distinct from both "confirmed" and "refuted", and it needs a pre-planned response. Two opposite failures are on record from consecutive runs of the same loop: one concluded mid-flight that the verifier had stalled and published "no independent verdict backs this PR" (the agent returned about a minute later); the next held roughly an hour of session time waiting for a notification that genuinely never arrived.
 
@@ -161,7 +161,7 @@ RULE 2 (the substantive lesson from what that verifier found): comparing an ERRO
 
 Three corollaries, all from the same review:
 
-- Fixing one instance of a defect class obliges auditing every sibling instance. The same run hardened one LLM-brief field against exactly this trap and left its twin shipping a differently-weighted pair WITH a prompt instruction to difference it.
+- Fixing one instance of a defect class obliges auditing every sibling instance. The same run hardened one field against exactly this trap and left its twin shipping a differently-weighted pair WITH a prompt instruction to difference it.
 - Analysing only "clean" windows silently drops real production days. Restricting to full-length lookback windows excluded six genuinely shipped reports and understated the bug from 8 days to 5.
 - A test can be named for a property it does not actually test. An "invariant to the later day weights" fixture used a UNIFORM move, which is weight-invariant under ANY index formula, so the estimator could be mutated Laspeyres to Paasche with the whole suite still green. Pin a choice with a fixture where the alternatives genuinely disagree.
 
@@ -171,7 +171,7 @@ And: do not accept a verifier correction without checking it either. One correct
 
 A verifier given the branch and the claim, but NOT the precondition the claim is scoped to, will test the unconditional version, find it false, and return a confident REFUTED wrapped around several correct minor findings. The headline is wrong and the details are right, which is the most expensive shape of feedback to receive because it is tempting to reject the whole thing.
 
-Concrete case: a PR said, at length and with `curl` output, that its fix only becomes reachable once a SECOND open PR merges (that PR converts a 500 into an empty 200). Every browser result in the PR body was captured against `branch + other-PR`. The verifier prompt described the claim and the branch but never mentioned the other PR, so it tested the branch against the base alone, hit the 500, and reported the fix "can never render in production" as a fatal finding. That was the PR's own documented caveat handed back as a refutation.
+Concrete case: a PR stated, at length and with `curl` output, that its fix only becomes reachable once a SECOND open PR merges (that PR converts a 500 into an empty 200). Every browser result in the PR body was captured against `branch + other-PR`. The verifier prompt described the claim and the branch but never mentioned the other PR, so it tested the branch against the base alone, hit the 500, and reported the fix "can never render in production" as a fatal finding. That was the PR's own documented caveat handed back as a refutation.
 
 What to do:
 
@@ -180,3 +180,11 @@ What to do:
 - When a verdict comes back REFUTED, check FIRST whether it evaluated the same configuration you did. If not, the verdict is about a different artifact; the sub-findings may still be entirely valid and should be triaged individually rather than dismissed with the headline.
 
 The corollary is the more useful half: in that same run the verifier's minor findings were all correct (an "A and B both fire" claim about two mutually exclusive branches, an "only a reload can fix it" claim when a route remount also cleared the state, and an unreachable `??` fallback). Those were prose written loosely enough that the agent's OWN screenshot contradicted it. A wrong headline verdict does not license discarding the details.
+
+### A research subagent can delegate instead of researching, and the orphaned child later overwrites the shared output file
+
+A subagent given a research prompt spawned its own subagent and returned a status update ("I've launched an agent, I'll report back") as its final answer. Resuming the parent with "do not delegate, do it yourself" worked, but the orphaned child could not be cancelled from the parent and kept running against the SAME output path, landing on top of the resumed parent's file about 90 seconds later.
+
+Why: a subagent's final message is its return value, so a status update is a null result that costs a full agent's runtime. And two agents pointed at one file path is a last-writer-wins race with no error.
+
+How to apply: (1) tell research subagents explicitly "do NOT spawn subagents, do the searching yourself, return the actual findings"; (2) if you must resume a delegating agent, give the resumed run a DIFFERENT output path, or re-read the file afterward and check which version landed (grep for a marker unique to each version) before trusting it; (3) treat "I'll report back" in a final message as a failed agent, not a partial one.

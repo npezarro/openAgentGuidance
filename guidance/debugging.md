@@ -17,7 +17,7 @@ Before touching code or forming hypotheses, check whether this problem (or a clo
 - **CLAUDE.md**: The repo's CLAUDE.md documents architecture decisions and known gotchas
 - **Guidance**: Check this repo's other guidance files for domain-specific rules
 - **Knowledge base**: Scan your knowledge base index for cross-repo patterns
-- **Private context repo**: Check for credentials, registered URIs, or infrastructure details that constrain the solution
+- **Your private context repo**: Check for credentials, registered URIs, or infrastructure details that constrain the solution
 - **Git history**: `git log --oneline --grep="<keyword>"` to find prior fixes
 
 This is not optional background reading; it's the most efficient debugging step. **The previous session's fix is often already documented in memory.** Skipping this to "save time" causes multi-hour debugging loops.
@@ -138,7 +138,7 @@ git bisect good <hash>  # this commit was working
 
 - **Database is locked**: In SQLite, concurrent writes cause locking.
   - **Fix**: Move updateMany or createMany calls OUT of loops. Consolidate into a single operation per user/batch.
-  - **Pragma**: Use PRAGMA busy_timeout=5000; to make SQLite wait instead of failing immediately.
+  - **Pragma**: Use `PRAGMA busy_timeout=5000;` to make SQLite wait instead of failing immediately.
 - **executeRawUnsafe vs queryRawUnsafe for PRAGMAs**: Use `$queryRawUnsafe` for **both** `PRAGMA journal_mode=WAL` and `PRAGMA busy_timeout=5000`. Catch and ignore `"Execute returned results"`; it means the PRAGMA worked. Log all other errors.
   ```ts
   prisma.$queryRawUnsafe(`PRAGMA journal_mode=WAL;`).catch((err) => {
@@ -152,19 +152,21 @@ git bisect good <hash>  # this commit was working
   ```
   DATABASE_URL="file:./production.db?connection_limit=1&timeout=30&pool_timeout=30"
   ```
+  One app needed seven commits to stabilize on this setting.
 - **Prisma singleton: always assign to global, even in production.** The common guard `if (process.env.NODE_ENV !== 'production')` before `globalForPrisma.prisma = prisma` is wrong; Next.js worker threads reload modules without reinitializing globals. Remove the guard:
   ```ts
   export const prisma = globalForPrisma.prisma || createPrisma();
   globalForPrisma.prisma = prisma;  // always, not just in dev
   ```
-- **Next.js apps OOMing under load:** Increase heap in your process manager's config:
+  Observed as an OOM crash loop that only stopped once the guard was removed.
+- **Next.js apps OOMing under load:** Increase heap in the process manager's config:
   ```js
   env: { NODE_OPTIONS: '--max-old-space-size=1024' }
   ```
   Also raise the memory-restart threshold to match (e.g., `1G`).
 - **`datetime('now')` strings parse as LOCAL time in `new Date()`, not UTC.** SQLite stores UTC as `"YYYY-MM-DD HH:MM:SS"` (space-separated, no `T`/`Z`). The ECMAScript Date parser treats that non-ISO form as local time, so rendering a stored timestamp via `new Date(created_at)` silently shifts it by the viewer's UTC offset (7-8h for Pacific users), and can shift the displayed date near UTC midnight. This bites both Prisma-on-SQLite and raw `better-sqlite3` apps alike; it's a JS Date-parsing bug, not a Prisma one.
   - **Fix**: normalize before parsing; strict-match `/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/` and rewrite to `` `${date}T${time}Z` ``; pass already-ISO strings through unchanged. SQL-side comparisons like `date(created_at) = utcToday` are unaffected (both sides stay UTC).
-  - Verify with: `new Date('2026-07-06 12:00:00').toISOString()` on a non-UTC host. If you fix this in one app, grep sibling apps for copies of the same timestamp component; this pattern spreads by copy-paste.
+  - Verify with `new Date('2026-07-06 12:00:00').toISOString()` on a non-UTC host; it returns the local-shifted instant. When one app has this bug, grep sibling apps for copies of the same timestamp component; cloned UI components carry the bug with them.
 
 ### 10. Prisma + PostgreSQL: Use pg.Pool, Not Raw Connection String
 
@@ -186,13 +188,13 @@ const prisma = new PrismaClient({ adapter });
 
 `new PrismaPg({ connectionString })` creates an unmanaged pool with no limits.
 
-### 11. Tools Run by a Headless Agent Must Be Non-Interactive
+### 11. Tools Run by a `claude -p` Agent Must Be Non-Interactive
 
-An automation flow that dispatches work to a headless agent (e.g. `claude -p`) runs with no TTY. Any CLI the agent invokes that blocks on interactive input (e.g. a `readline` "approve/edit?" prompt) will hang silently, and the agent will quietly fall back to a worse path (or time out). Symptoms: "the tool exists and is wired up, but the nice pipeline never seems to actually run."
+An automation flow that dispatches work to a `claude -p` agent runs with no TTY. Any CLI the agent invokes that blocks on interactive input (e.g. a `readline` "approve/edit?" prompt) will hang silently, and the agent will quietly fall back to a worse path (or time out). Symptoms: "the tool exists and is wired up, but the nice pipeline never seems to actually run."
 
 Fixes:
 - Give the tool an `--auto`/`--yes` flag AND auto-enable it when `!process.stdin.isTTY`, so it never hangs regardless of how it's launched.
-- Don't depend on an API key for sub-steps; route model calls through the same CLI the agent already runs under, so the tool works in the same keyless environment as the agent.
+- Don't depend on an `ANTHROPIC_API_KEY` for sub-steps; route model calls through the `claude -p` CLI (subscription auth) so the tool runs in the same keyless environment as the agent.
 - Make the tested tool the canonical path; prompts that re-describe a "manual fallback" flow drift and silently lose features.
 
 ### 12. Browser CDP Timeout Recovery: Kill + Restart Pattern
@@ -201,7 +203,7 @@ When a service calls a browser-agent CLI and receives "Timeout waiting for brows
 
 1. Detect the specific timeout error string in your error handler
 2. Kill all chrome/chromium processes: `pkill -f chrome || true`
-3. Restart the browser-agent service via your process manager
+3. Restart the browser-agent service through your process manager
 4. Implement a startup connectivity check that triggers recovery *before* the main task:
 
 ```js
@@ -217,7 +219,7 @@ async function checkBrowserConnectivity() {
 
 async function restartBrowserSystem() {
   execSync('pkill -f chrome || true');
-  execSync('<your process manager> restart browser-agent');
+  execSync('<process-manager> restart browser-agent');
   await new Promise(resolve => setTimeout(resolve, 3000)); // wait for startup
 }
 ```
@@ -226,7 +228,7 @@ Also increase the base CLI timeout from 60s to 120s to avoid false-positive time
 
 ### 13. Reading a SQLite DB Another Process Is Actively Writing (WAL Mode)
 
-When polling a SQLite database that a running app writes to (e.g. a desktop app's `*.sqlite` in WAL mode), a `mode=ro` / `SQLITE_OPEN_READONLY` connection can return a **stale snapshot**; it reads committed WAL frames as of some earlier point and doesn't advance, even across freshly-spawned reader processes. Classic symptom: "it caught the first change but never the next ones," while the process is alive and manual one-off queries look current.
+When polling a SQLite database that a running app writes to, a `mode=ro` / `SQLITE_OPEN_READONLY` connection can return a **stale snapshot**; it reads committed WAL frames as of some earlier point and doesn't advance, even across freshly-spawned reader processes. Classic symptom: "it caught the first change but never the next ones," while the process is alive and manual one-off queries look current.
 
 Fix: open a **normal (read-write-capable) connection with `PRAGMA query_only=ON`** instead. It participates in the WAL protocol correctly and reliably sees the latest committed rows, while `query_only` guarantees you never modify the app's data. Add `.timeout <ms>` so a momentary writer lock yields a retry instead of an empty read.
 
@@ -243,31 +245,31 @@ Second gotcha when your reader writes to the macOS clipboard: an app that pastes
 
 Pino's signature is `logger.error(mergingObject, msg)`; extra args after a string message are printf interpolation values, and with no `%s`/`%d`/`%o` in the message they are **silently discarded**. Console-style calls like `logger.error('failed:', err.message)` produce `"msg":"failed:"`; the diagnostic ends at the colon and the actual error never reaches any log. Symptom while debugging: an error repeats but its message trails off with `:` and nothing after.
 
-Fixing call sites one-by-one does not work: repeated audit passes still leave dozens of multi-arg sites, and new ones reappear with every feature. **Fix the class at the logger:** install a `hooks.logMethod` that appends would-be-dropped extras to the message. Canonical `(obj, msg)` and printf-style calls pass through untouched. Any repo that adopts pino should get the hook from day one.
+Fixing call sites one-by-one does not work: two audit passes over one repo still left 135 multi-arg sites, and new ones reappear with every feature. **Fix the class at the logger:** install a `hooks.logMethod` that appends would-be-dropped extras to the message. Canonical `(obj, msg)` and printf-style calls pass through untouched. Any repo that adopts pino should get the hook from day one.
 
-### 15. A Headless Agent CLI Is the Full Agentic CLI: Run Free-Text Calls in an Empty CWD and Retry Broadly
+### 15. `claude -p` Is the Full Agentic CLI: Neutral CWD, Broad Retries
 
-`claude -p --dangerously-skip-permissions` is the FULL agentic CLI, not a constrained text-completion endpoint. Two operational consequences apply to any pipeline that shells out to it:
+`claude -p --dangerously-skip-permissions` is the FULL agentic Claude Code CLI, not a constrained text-completion endpoint. Two operational consequences apply to any pipeline that shells out to it:
 
 1. **CWD hygiene.** When the subprocess runs with its working directory inside a repo, the spawned sub-agent can explore that repo and inject meta-commentary into its output (observed: a generated free-text brief narrated the relative source path it was invoked from). FIX: for free-text generation calls, set the subprocess cwd to an empty/neutral directory (e.g. a `tempfile.mkdtemp()`) so there is no repo to explore. For calls whose output is strictly parsed (e.g. JSON extraction) the risk is lower, but the same cwd hygiene is cheap insurance.
 
-2. **Retry breadth.** Retry logic must retry on ANY non-zero exit code AND on empty stdout, not only when stderr matches "rate"/"limit". Nested invocations intermittently exit 1 with an EMPTY stderr (a transient); code that only retries on rate/limit strings hard-fails on the first blip. FIX: retry on any non-zero return or empty output, with exponential backoff, up to N attempts.
+2. **Retry breadth.** Retry logic for `claude -p` must retry on ANY non-zero exit code AND on empty stdout, not only when stderr matches "rate"/"limit". Nested `claude -p` invocations intermittently exit 1 with an EMPTY stderr (a transient); code that only retries on rate/limit strings hard-fails on the first blip. FIX: retry on any non-zero return or empty output, with exponential backoff, up to N attempts.
 
-### 16. `git symbolic-ref origin/HEAD` Exits 128 When Unset; Under `set -euo pipefail` It Silently Kills the Rest of the Script
+### 16. `git symbolic-ref origin/HEAD` Exits 128 When Unset, Killing the Rest of the Script
 
-`origin/HEAD` is populated by `git clone` and by nothing else, not by `git remote add` + fetch, and never refreshed afterwards. On a checkout that lacks it, `git symbolic-ref refs/remotes/origin/HEAD` exits 128.
+`origin/HEAD` is populated by `git clone` and by nothing else; not by `git remote add` + fetch, and never refreshed afterwards. On a checkout that lacks it, `git symbolic-ref refs/remotes/origin/HEAD` exits 128.
 
 Under `set -euo pipefail`, piping that into `sed` does NOT save you: `pipefail` promotes the 128 past the `sed`, and `set -e` terminates the script. A trailing `2>/dev/null` hides the MESSAGE but not the exit code, which makes the line look handled when it is not.
 
-Observed shape: a watchdog script died two-thirds of the way through on every run for weeks. Everything below the failing line never ran, including its reachability check and its entire alert-sending block.
+Observed shape: a watchdog script died mid-file on every run for months. Everything below that line never ran, including its reachability check and its entire alert-sending block. The proof was its state file, written on the last line, frozen at the exact date the check was added.
 
 **Why:** exit-code propagation through `pipefail` is invisible when stderr is suppressed. **How to apply:** any command substitution that can legitimately fail needs an explicit `|| true` under `set -e`, especially git plumbing. When a long script has an unexplained silent partial-effect, check for a mid-script non-zero exit before suspecting logic. A frozen end-of-script state file is the cheapest proof.
 
-### 17. cron PATH Excludes `/usr/local/bin`; With `set -e` That Kills a Script Silently, and a Silent Job's Log mtime Never Moves
+### 17. cron PATH Excludes /usr/local/bin; With set -e That Kills a Script Silently
 
-cron runs with `PATH=/usr/bin:/bin`. Anything in `/usr/local/bin` (node, npm, most globally-installed tooling, and most process managers) is NOT found. Combined with `set -euo pipefail`, the first such call kills the script before it does anything.
+cron runs with `PATH=/usr/bin:/bin`. Anything in `/usr/local/bin` (node, npm, process managers, and most globally-installed tooling) is NOT found. Combined with `set -euo pipefail`, the first such call kills the script before it does anything.
 
-Observed shape: a process-manager watchdog had been dying on every scheduled run because its process-manager binary was not on cron's PATH. It is a MONITOR, so its death meant nothing was watching the services at all.
+Observed shape: a watchdog had been dying on every scheduled run because its process-manager binary was not on cron's PATH. It is a MONITOR, so its death meant nothing was watching the thing it guarded.
 
 The compounding nuance, which is the reusable part: `>>` updates a log file's mtime only on an actual WRITE, not on open. A job that fails before producing output leaves its log 0 bytes with the mtime frozen at whenever it last wrote. So a freshness checker watching that file sees nothing move and cannot distinguish "silently dead for weeks" from "never had anything to say".
 
@@ -277,9 +279,9 @@ The compounding nuance, which is the reusable part: `>>` updates a log file's mt
 
 Node >= 20 dials a `localhost` hostname with happy-eyeballs (`::1` and `127.0.0.1` in parallel). When BOTH fail it throws an `AggregateError` whose `.message` is the EMPTY STRING, with the real per-address errors in `.errors`. So the ubiquitous idiom `err.message || "some fallback"` selects the fallback and the diagnosis is gone.
 
-Observed shape: a service stored and logged "Recovery failed: recovery failed", naming neither the error code nor the port, so the outage took a live repro to identify. undici compounds it: every connection failure is reported as the opaque string `"fetch failed"` with the real reason hidden in `.cause`.
+Observed shape: an app stored and logged "Recovery failed: recovery failed", naming neither the error code nor the port, so the outage took a live repro to identify. undici compounds it: every connection failure is reported as the opaque string "fetch failed" with the real reason hidden in `.cause`.
 
-It is ENVIRONMENT-DEPENDENT, which is why it does not reproduce locally: a single-stack host resolves `localhost` to one address and throws a plain `Error` with a usable message; a dual-stack host throws the empty-message `AggregateError`. A test that dials a dead port therefore asserts different things on the two machines; build the `AggregateError` by hand in the test instead.
+It is ENVIRONMENT-DEPENDENT, which is why it may not reproduce locally: a single-stack host resolves `localhost` to one address and throws a plain `Error` with a usable message; a dual-stack host throws the empty-message `AggregateError`. A test that dials a dead port therefore asserts different things on the two machines; build the `AggregateError` by hand in the test instead.
 
 How to apply:
 1. Never format an error with `.message` alone. Use a `describeError()` that walks `.errors` and `.cause` and appends code + address:port.
@@ -290,13 +292,13 @@ How to apply:
 
 When a tab strip that only scopes an input control sits immediately above a result list, users read it as a filter on the list and report the list as broken ("X selected, cannot click on Y") even when the list is not gated at all. Two fixes, both cheap: label the tab row for what it actually scopes, and give the list its own explicit filter with an All default.
 
-Before rewriting behaviour, prove the gating claim: hit-test each row with `document.elementFromPoint` at its centre and check the tag/href, which separates "an overlay eats the tap" from "this row was never a link" from "the user misread the control". In one such case the real defect the report was pointing at was different from its literal wording: pending rows rendered as a `div` with no `href`, so any still-running result was genuinely unclickable.
+Before rewriting behaviour, prove the gating claim: hit-test each row with `document.elementFromPoint` at its centre and check the tag/href, which separates "an overlay eats the tap" from "this row was never a link" from "the user misread the control". In the observed case the real defect was different from the report's literal wording: pending rows rendered as a `div` with no `href`, so any still-running result was genuinely unclickable.
 
-### 20. One Split Multi-Byte Character Makes grep Treat a Whole Text File as Binary and Report Nothing, With No Error
+### 20. One Split Multi-Byte Character Makes grep Treat a Whole Text File as Binary
 
-Observed in a generated index file whose per-entry hooks are truncated to a fixed width: one truncation cut a UTF-8 ellipsis in half, leaving an orphan `\xe2\x80` immediately before a valid `\xe2\x80\xa6`. Two stray bytes in 13KB.
+Observed in a generated index file whose per-entry lines are truncated to a fixed width: one truncation cut a UTF-8 ellipsis in half, leaving an orphan `\xe2\x80` immediately before a valid `\xe2\x80\xa6`. Two stray bytes in 13KB.
 
-The failure mode is silence, not an error. grep classifies the file as binary and suppresses matches, so `grep -n <term> FILE` printed nothing and `grep -c "" FILE` printed nothing, which reads exactly like "that term is not in the file". Three greps in a row came back empty before Python's `open().read()` finally raised `UnicodeDecodeError` and named the offset. Note that `grep -a` would have worked all along, and so would Python with `errors='replace'`; the trap is that the natural first tool fails quietly.
+The failure mode is silence, not an error. grep classifies the file as binary and suppresses matches, so `grep -n <term> FILE` printed nothing and `grep -c "" FILE` printed nothing, which reads exactly like "that term is not in the file". Three greps in a row came back empty before python's `open().read()` finally raised `UnicodeDecodeError` and named the offset. Note that `grep -a` would have worked all along, and so would python with `errors='replace'`; the trap is that the natural first tool fails quietly.
 
 Detect: `python3 -c "open(P,encoding='utf-8').read()"` and let it raise; the exception carries the byte offset. Or `file P` (reports `data` rather than `UTF-8 Unicode text`), or `grep -c $ P` vs `grep -ac $ P` disagreeing.
 
@@ -304,39 +306,39 @@ Repair: read bytes, splice out the orphan sequence, `decode()` to prove the whol
 
 Generalises to any generated file whose lines are truncated to a width: index files, log summaries, digests, commit-message subjects, anything doing `s[:80]` on text that may contain non-ASCII. Truncate by characters after decoding, never by bytes.
 
-### 21. A Grep-Gated Feature Never Fires When the Gate Pattern Doesn't Match the Actual Generated Content
+### 21. A Grep-Gated Feature Never Fires When the Gate Pattern Doesn't Match the Generated Content
 
-Observed shape: a pipeline's context-injection step gated on `grep -q "<three intuitive keywords>"` against generated `*.md` files, but the write template that produces those files never emits any of those three substrings (it wrote `**Restart count:**` and `## Classification: <...>`). The write side was implemented and producing real files; the read side's gate silently never matched, so the context was NEVER injected into any prompt since the feature was added. A fully dark feature with no error, no log line, nothing.
+A pipeline gated its context-injection step on `grep -q "<keywords>"` against generated `*-priority.md` files, but the write template that produces those files never emits any of the gated substrings (it writes different headings). Result: the write side had been implemented and was producing real files, but the read side's gate silently never matched, so the context was NEVER injected into any prompt since the feature was added; a fully dark feature with no error, no log line, nothing.
 
-The fix was to gate on `^## Classification:`, the heading every real file actually contains, verified directly against a live generated file (old pattern: no match; new pattern: match) and confirmed against every other file in the directory for regressions.
+The fix was to gate on a heading every real file actually contains (`grep -q "^## Classification:"`), verified directly against a live generated file (old pattern: no match; new pattern: match) and checked for regression against the other files in the directory.
 
-**General lesson:** when a producer and consumer communicate via a string/grep match on generated content rather than a shared constant or schema, verify the match condition against a REAL generated sample, not against the keywords that seem intuitive. This class of bug produces zero errors and zero symptoms, so it only surfaces via direct inspection of whether the consumer's condition ever actually fires.
+General lesson: when a producer and consumer communicate via a string/grep match on generated content rather than a shared constant or schema, verify the match condition against a REAL generated sample, not against the keywords that seem intuitive. This class of bug produces zero errors and zero symptoms, so it only surfaces via direct inspection of whether the consumer's condition ever actually fires.
 
 ### 22. A Cached/Stale State API Makes You Report a Confidently Wrong Number
 
-Diagnosing why a machine was capped at 30fps, the display mode was read from Windows WMI `Win32_VideoController` (`CurrentHorizontalResolution`, `CurrentVerticalResolution`, `CurrentRefreshRate`) and reported to the user as "1920x1080 @ 30Hz". The real mode, from `EnumDisplaySettings(dev, ENUM_CURRENT_SETTINGS)`, was **1280x720 @ 30Hz**. WMI's `Current*` fields are populated at driver init and are NOT re-read on mode change, so they can report a mode the machine has not been in for hours. The refresh rate happened to be right, the resolution was wrong, and nothing in the WMI output distinguishes the two; both look equally authoritative.
+Diagnosing why a video-streaming host was capped at 30fps, the display mode was read from Windows WMI `Win32_VideoController` (`CurrentHorizontalResolution`, `CurrentVerticalResolution`, `CurrentRefreshRate`) and reported to the user as "1920x1080 @ 30Hz". The real mode, from `EnumDisplaySettings(dev, ENUM_CURRENT_SETTINGS)`, was **1280x720 @ 30Hz**. WMI's `Current*` fields are populated at driver init and are NOT re-read on mode change, so they can report a mode the machine has not been in for hours. The refresh rate happened to be right, the resolution was wrong, and nothing in the WMI output distinguishes the two; both look equally authoritative.
 
-What made it survivable: another API disagreed. `System.Windows.Forms.Screen.AllScreens` reported bounds of 1280x720 in the *same* parallel tool call. **Two state-reading APIs disagreeing about the same instant is not noise to average out or pick the likelier value from; it means at least one is not reading live state, and the question is which.**
+What made it survivable: another API disagreed. `System.Windows.Forms.Screen.AllScreens` reported bounds of 1280x720 in the *same* parallel tool call. **Two state-reading APIs disagreeing about the same instant is not noise to average out or pick the likelier value from; it means at least one is not reading live state, and the question is which.** Same shape as a page-fetching summarizer confidently misreading a document it fetched correctly, and the same resolution: go to the authoritative source rather than adjudicating between convenient ones.
 
-Rule: for any state you are going to REPORT to a user or branch a decision on, prefer the API whose contract is "read the live value now" over the one that is convenient or already in your output. On Windows specifically: `EnumDisplaySettings` over `Win32_VideoController` for display mode; and note the same class of trap exists for anything cached at init (WMI `Win32_*` snapshots, `/proc` values sampled once, ORM-level caches, any getter that returns a driver-reported struct rather than querying).
+Rule: for any state you are going to REPORT to a user or branch a decision on, prefer the API whose contract is "read the live value now" over the one that is convenient or already in your output. On Windows specifically: `EnumDisplaySettings` over `Win32_VideoController` for display mode; and note the same class of trap exists for anything cached at init (WMI `Win32_*` snapshots, `/proc` values sampled once, ORM-level caches, any `Get-*` that returns a driver-reported struct rather than querying).
 
-Corroboration beats assertion when closing this out: the fix was confirmed not by re-reading the same API, but by restarting the *consumer* and checking IT reported the new refresh rate, plus finding a pre-fix log line proving the client had been asking for the higher rate all along and the display was the refusing party.
+Corroboration beats assertion when closing this out: the fix was confirmed not by re-reading the same API, but by restarting the consumer process and checking IT reported a 60Hz display, plus finding a pre-fix log line proving the client had been asking for 60 all along and the display was the refusing party.
 
-### 23. `readfile()` Stores a BLOB, and a BLOB Column Reaches a Node App as a Buffer That 500s the Page
+### 23. `sqlite3 readfile()` Stores a BLOB, and a BLOB Column Reaches a Node App as a Buffer That 500s the Page
 
-Inserting a markdown document into a table with the `sqlite3` CLI's `readfile()` produced a row whose `typeof(col)` is `'blob'`, not `'text'`. `better-sqlite3` returns a BLOB as a Node `Buffer`, so the render path called `.replace` on a Buffer and every SSR request for that page died with `TypeError: a.replace is not a function` and an HTTP 500. The insert itself reported success and the row looked correct to `select length(col)`.
+Inserting a markdown answer into a table with the `sqlite3` CLI's `readfile()` produced a row whose `typeof(col)` is `blob`, not `text`. better-sqlite3 returns a BLOB as a Node `Buffer`, so the render path called `.replace` on a Buffer and every SSR request for that page died with `TypeError: a.replace is not a function` and an HTTP 500. The insert itself reported success and the row looked correct to `select length(col)`.
 
 Rules:
 1. When loading file content into SQLite from the CLI, wrap it: `CAST(readfile('/path') AS TEXT)`. `readfile()` is documented to return a blob; the type is invisible unless you ask for `typeof()`.
 2. After any hand-written row insert into a live app's DB, check `typeof()` on the column AND fetch the rendering page, not just the row. A row that selects cleanly can still be the wrong storage class for the consumer.
-3. Byte length and character length differ after the cast (e.g. 35618 bytes to 35320 characters, from multi-byte characters). That difference is the confirmation the text decoded as UTF-8, not a sign of truncation.
+3. Byte length and character length differ after the cast (multi-byte characters). That difference is the confirmation the text decoded as UTF-8, not a sign of truncation.
 4. Symptom to recognize: a Node/Next.js page that 500s with `X.replace is not a function` inside an `Array.map` right after a manual DB write is a storage-class bug, not a data bug.
 
 ### 24. A Reply-Address Must Name Where the Payload Landed, Not a Location the Job Was Holding
 
 A feature that both DELIVERS a payload to a location and ADDRESSES a reply channel back to it has two independent notions of "the location", and they can silently diverge. When they do, every component tests green and the user still reports the feature as broken, because a correct delivery to the wrong place is indistinguishable from no delivery at all.
 
-Concrete shape: a long answer is folded into a NEW overflow thread created at post time, while the completion notification derived its reply address from the job record's *streaming* thread id. Both were real, live, same parent channel. The relay worked, the agent answered correctly, the completion mention fired correctly, and all three landed in the thread holding only progress updates while the user read the thread holding the answer.
+Concrete shape: a long answer is folded into a NEW overflow thread created at post time, while the completion email derived its Reply-To from the job record's original streaming thread id. Both were real, live, in the same parent channel. The emailed reply relayed correctly, the agent answered correctly, the "your follow-up is complete" mention fired correctly, and all three landed in the thread holding only progress updates while the user read the thread holding the answer.
 
 Two tells that this class of bug is present:
 1. The code has a thread/channel/room id in hand from EARLIER in the job (a record field, a variable captured at start) and uses it for an address, while the actual post happens LATER through a helper that may create its own destination.
@@ -345,7 +347,39 @@ Two tells that this class of bug is present:
 Fix shape: make the posting helper RETURN the surface it delivered to (and null when it did not create one), and have the caller derive the address from that return value, falling back to the previously known id only when the helper made no new surface. Also name the divergence where it is visible: the abandoned surface should point at the real one ("Answer: <link>"), or it reads as a job that produced nothing.
 
 Two follow-on rules, both code rules rather than debugging tells:
-1. **LOG THE DESTINATION YOU RESOLVED TO, not the one you were handed.** The log line read "Relaying ... into thread `<id>`" using the ADDRESSED id, so the misroute looked like a healthy relay in the logs and sent the investigation at the transport code instead of at the two ids. Any line that reports a delivery must print the surface the payload actually landed on.
-2. **A SENT ADDRESS CANNOT BE REWRITTEN.** If the reply-address is signed (or simply already delivered), fixing the code only helps future sends; everything already in the recipient's inbox still points at the old surface. Persist the move as a redirect resolved at delivery time, bound the hops and guard the cycle, and keep every trust gate on the ORIGINAL signed id so the redirect rewrites the address and never the authorisation.
+1. **Log the destination you resolved to, not the one you were handed.** The log line read "Relaying ... into thread `<id>`" using the ADDRESSED id, so the misroute looked like a healthy relay in the logs and sent the investigation at the transport code instead of at the two ids. Any line that reports a delivery must print the surface the payload actually landed on.
+2. **A sent address cannot be rewritten.** If the reply-address is signed (or simply already delivered), fixing the code only helps future sends; everything already in the recipient's inbox still points at the old surface. Persist the move as a redirect resolved at delivery time, bound the hops and guard the cycle, and keep every trust gate on the ORIGINAL signed id so the redirect rewrites the address and never the authorisation.
 
-**Debugging tell:** when a user says "I replied and nothing showed up", do not start from the relay. Get the id of the surface the user is looking at and the id the system posted to, and compare them BEFORE reading any transport code.
+Debugging tell: when a user says "I replied and nothing showed up", do not start from the relay. Get the id of the surface the user is looking at and the id the system posted to, and compare them BEFORE reading any transport code.
+
+### 25. Size a Retry Against the Dependency's Recovery Time, and Log the Cause Chain
+
+Two production AI-job failures on consecutive days shared the same two defects, and the second is what made the first hard to find.
+
+1. **The retry was sized against a blink, not against recovery.** The client retried a transport failure once, 30 seconds later, then failed the job. But the dependency was a container on another host reached over a reverse SSH tunnel, and NEITHER of its recovery paths finishes in 30s: recreating the container refuses connections for the whole `docker compose up -d` cycle, and after a tunnel drop the SERVER holds the dead session's forward for up to `ClientAliveInterval x ClientAliveCountMax` (120s x 3 = 6 minutes) while the client's `ExitOnForwardFailure=yes` makes every reconnect inside that window exit instead of binding the port. So the retry constant was chosen against an imagined packet loss, not against the measured time the service takes to come back.
+
+   RULE: before picking a retry delay, name the dependency's slowest NORMAL recovery event and read its actual duration out of the config that governs it (systemd `RestartSec`, sshd `ClientAlive*`, a container healthcheck's `start_period`, an autoscaling group's cooldown). A single retry is only correct when the failure is a lost packet. Back off across a window that covers the recovery, and stop early when the next sleep would outlive the call's own abort deadline; sleeping into an abort converts a diagnosable network error into a bare "timed out" and discards the cause.
+
+2. **The log threw the diagnosis away.** undici (and Node's global `fetch`) reports EVERY transport failure as the same six characters, `TypeError: fetch failed`, and puts the real reason on `.cause`. Logging `err.message` alone therefore records an identical, useless line whether the service is mid-restart, the tunnel dropped, or the far end reset the socket mid-body. Two days of production failures left exactly one repeated line and nothing to tell the three apart.
+
+   Worse: when the URL host is `localhost` it resolves to BOTH `::1` and `127.0.0.1`, so an all-refused connect arrives as an `AggregateError` whose own `.message` is the EMPTY STRING and whose real reasons live in `.errors`, not in `.cause`. A `.cause`-only walk prints "(no message)" and adds nothing.
+
+   RULE: log the flattened cause chain, not `err.message`. Walk BOTH `.cause` and `AggregateError.errors`, bound the depth (a cause can be self-referential), and include `.code` at each level. Classify transient-vs-permanent against the FLATTENED string for the same reason: a matcher reading only the outer message cannot see `ECONNREFUSED` behind an empty-message `AggregateError`.
+
+3. **A generic failure message misattributes blame.** "Task processing failed. Please try again." reads as "your input broke it". When the transport never reached the service, say the service was unreachable: the user is deciding whether to spend another rate-limited action, and only one of those two messages answers that.
+
+When you fix this in one app, check the siblings before porting: cloned scaffolds diverge, so one may already read `.cause` while another still carries the single-30s-retry defect verbatim.
+
+### 26. A Progress Heartbeat That Stores Only a Timestamp Cannot Say WHERE a Job Died
+
+A job reaper was correctly rewritten to reap on silence since `last_progress_at` rather than age since `created_at`. But `touchJobProgress(id, phase)` took the phase and used it ONLY inside an error message: the column stored the time and threw the phase away.
+
+Two long-running jobs then stranded and were reaped. Investigating two days later, the only surviving evidence was "last heartbeat 18-22 minutes in" plus one line, `Unexpected error: fetch failed`, in a process-manager log that rotates daily and had already been flushed. Every reaped job stored the identical sentence, so the row could not tell them apart either.
+
+Why: a heartbeat gets written to answer "is this still alive?", which is a liveness question, and liveness only needs a timestamp. The question actually asked later is always "where did it stop?", which is a diagnosis question, and the phase is the whole answer. The two get conflated because one UPDATE serves both and the diagnosis half is free.
+
+How to apply:
+1. Persist the phase next to the timestamp and put it in the terminal message the recovery sweep writes ("Interrupted ... (stopped during: `<phase>` step 212/419)"). Build that message from ONE function the row, the email and the notification all call, so three surfaces cannot disagree about one event.
+2. Audit for heartbeat-free windows. Any stretch between two stamps is a blind spot sized by the reaper's cutoff. A multi-stage enrichment phase sat between two stamps with none of its own. A long phase should heartbeat from INSIDE (pass a per-item callback, throttled to one write a minute), not only at its boundaries.
+3. A pool is not bounded just because its units are. Every enrichment phase was a `Promise.all` over workers whose fetches had 12s timeouts and whose child processes had killSignal timeouts, yet ONE worker that never settles makes `Promise.all` never settle and strands the whole job inside a LIVE process, where a restart-triggered reaper never fires. Wrap the pool in a wall-clock deadline that fails open. The deadline must NOT cancel the underlying work: an orphaned promise costs a little memory, a stranded job costs the user the entire run.
+4. For a job that only runs on a schedule, a lost run is lost until the next tick, so size retries against the dependency's real recovery time rather than against a blink.
