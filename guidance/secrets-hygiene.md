@@ -16,7 +16,7 @@ Rules for handling secrets, credentials, and infrastructure details in code, esp
 
 When reading credential files (your private context repo, `.env`, etc.), confirm you found them by name but **never include actual values in your response text**. Reference credentials by variable name only ("got the API credentials from the private context repo"); the user already knows the values, and echoing them to chat creates unnecessary exposure in conversation logs and exports.
 
-**Why:** Credentials should stay in files and env vars. Chat output gets logged, exported, and sometimes shared. This is a habit violation, not a theoretical concern.
+**Why:** Credentials should stay in files and env vars. Chat output gets logged, exported, and sometimes shared. This rule comes from a real leak, not a theoretical concern.
 
 ### The leak usually arrives sideways, not from a deliberate `echo`
 
@@ -27,23 +27,23 @@ Nobody sets out to print a credential. The rule above is easy to follow for *int
 | `bash -x script.sh` / `set -x` | xtrace prints **every expansion**, so `. ~/.env` dumps the whole file, variable by variable, with values | `bash -n` for syntax; add explicit `echo` checkpoints; trace only the section after unsetting secrets |
 | `set -v` | Prints each line as read, including the sourced file | same |
 | `env` / `printenv` / `declare -p` / `set` with no args | Dumps the entire environment after sourcing | `printenv VAR_NAME >/dev/null; echo "VAR_NAME set: $?"` |
-| `caller \|& tee log` on a sourcing script | Trace lands in a file that later gets read back into context | Redirect trace to a file you never `cat` |
-| Any command that renders config: `docker compose config`, `kubectl get -o yaml`, `pm2 env <id>`, `systemctl show`, `terraform plan` | Resolves and prints every variable it was given, including the ones interpolated from `.env` | Assert presence, never render: see the rule below |
+| Any trace piped to `tee log` on a sourcing script | Trace lands in a file that later gets read back into context | Redirect trace to a file you never `cat` |
+| Any command that renders config: `docker compose config`, `kubectl get -o yaml`, `systemctl show`, `terraform plan`, a process manager's env dump | Resolves and prints every variable it was given, including the ones interpolated from `.env` | Assert presence, never render: see the rule below |
 
-A single debug run of `bash -x` on a script whose second line was `set -a; . ~/.env; set +a` once printed roughly twenty credentials (webhook URLs, an application password) straight into a session transcript. The script was not even broken; the failure being debugged was elsewhere. Cost: a full rotation cycle, plus secrets sitting in a session log that any transcript indexer would ingest on its next run.
+**A real incident prompted this section.** A debug run of `bash -x` on a script whose second line was `set -a; . ~/.env; set +a` printed roughly 20 credentials (webhook URLs, an application password) straight into a session transcript. The script was not even broken; the failure being debugged was elsewhere. Cost: a rotation cycle, plus secrets sitting in a session log that any transcript indexer would ingest on its next run.
 
 ### Never redact on the way out; assert presence instead
 
 A redaction filter is a **guess about output you have not seen yet**, and when the guess is wrong it fails silently and open. The value prints, the pipeline exits 0, and nothing marks the failure.
 
-A real case: verifying that a container would get its shared secret after a rebuild, the check was written as
+**A real incident.** Verifying that a container would get its shared secret after a rebuild, the check was written as:
 
 ```bash
 # WRONG: the sed is a guess about the output format
-docker compose config | sed -E 's/(APP_SECRET=).*/\1<redacted>/'
+docker compose config | sed -E 's/(BRIDGE_SECRET=).*/\1<redacted>/'
 ```
 
-`docker compose config` emits YAML (`APP_SECRET: value`), not dotenv (`KEY=value`). The pattern matched nothing, the substitution was a no-op, and a 64-character production secret printed in full into a transcript that gets forwarded to a notification channel.
+`docker compose config` emits YAML (`BRIDGE_SECRET: value`), not dotenv (`KEY=value`). The pattern matched nothing, the substitution was a no-op, and a 64-character production secret printed in full into a transcript that gets forwarded to a notification channel.
 
 The bug is not the specific regex. It is the shape: **the only way to know the format is to run the command, and by then it has already printed.** Any "print it but hide the value" approach has this property.
 
@@ -51,13 +51,13 @@ The bug is not the specific regex. It is the shape: **the only way to know the f
 
 ```bash
 # GOOD: proves it is set, and cannot print it even if the format changes
-docker exec <container> sh -c '[ -n "$APP_SECRET" ] && echo "set (len ${#APP_SECRET})"'
+docker exec <container> sh -c '[ -n "$BRIDGE_SECRET" ] && echo "set (len ${#BRIDGE_SECRET})"'
 
 # GOOD: same idea for a compose file, checks resolution without rendering values
 docker compose config --quiet && echo "compose resolves, no unset vars"
 
 # GOOD: confirm a specific key exists in a rendered config without showing it
-docker compose config | grep -c '^\s*APP_SECRET:' # expect 1
+docker compose config | grep -c '^\s*BRIDGE_SECRET:' # expect 1
 
 # GOOD: length and fingerprint are safe to show and are usually what you actually wanted
 printenv API_KEY | wc -c
@@ -99,7 +99,7 @@ get_token() {
 }
 
 # BAD: Hardcoded IP
-HOST="203.0.113.10"
+HOST="35.x.x.x"
 
 # BAD: SSH command revealing internal structure
 token=$(ssh myhost 'grep TOKEN /path/to/.env')
@@ -107,20 +107,20 @@ token=$(ssh myhost 'grep TOKEN /path/to/.env')
 
 ## Every Repo Must Have
 
-1. **`.gitignore`** that includes `.env`, `.env.local`, `*.pem`, `credentials.json`, `.claude/`
-2. **`.env.example`** documenting required variables with placeholder values
+1. **`.gitignore`**: includes `.env`, `.env.local`, `*.pem`, `credentials.json`, `.claude/`
+2. **`.env.example`**: documents required variables with placeholder values
 3. **No inline defaults that leak specifics**: use `YOUR_VALUE` or `:?` to require the var
 
-**Why `.claude/`?** The `.claude/settings.json` file contains agent hook configurations (curl-pipe-bash patterns, remote-exec URLs) that reveal internal architecture and represent a supply-chain risk in public repos. A portfolio-wide audit found this was systemic across ten or more repos. Any config files containing infrastructure details (repo lists, port maps, process names) should also use gitignored files with `.example` templates.
+**Why `.claude/`?** A `.claude/settings.json` file contains agent hook configurations (curl-pipe-bash patterns, remote-exec URLs) that reveal internal architecture and represent a supply-chain risk in public repos. A security sweep found this was systemic across 10+ repos and remediated it portfolio-wide. Any config files containing infrastructure details (repo lists, port maps, process names) should also use gitignored files with `.example` templates.
 
 ## Sensitive Identifiers (Non-Secret Leaks)
 
 Not all leaks are credentials. Usernames, private repo names, internal hostnames, and home directory paths also reveal infrastructure layout and should not appear in public repos, including in test fixtures, JSDoc examples, and documentation.
 
 Before making a repo public or writing example code in a public repo:
-1. Check your **private reference database** of sensitive identifiers for strings that must be sanitized
+1. Check your **private reference database** of identifiers that must be sanitized
 2. Replace real usernames, paths, and private project names with generic alternatives
-3. Verify that repo names referenced in tests and docs are actually public
+3. Verify that repo names referenced in tests/docs are actually public
 
 The reference database lists every known private identifier and its safe replacement. If you don't have one, use generic placeholders: `/home/user/`, `myProject`, `example.com`.
 
@@ -129,7 +129,7 @@ The reference database lists every known private identifier and its safe replace
 The identifier scan matches a **fixed list of known strings**. That makes it necessary and nowhere near sufficient. It cannot see:
 
 - **A file that is entirely about one specific system.** Nothing in a deployment runbook for one particular host need match a single pattern, and it is still unpublishable: it documents your infrastructure and is useless to anyone else.
-- **A name the list does not carry.** In one sweep the scan passed all 48 files in a guidance set; reading them then found hooks that hardcoded the operator's name inside their matching regexes, plus a header comment that described a real leak by naming a private community and two employers. Every one of those files was "clean".
+- **A name the list does not carry.** In one audit the scan passed all 48 files in a guidance set; reading them then found hooks that hardcoded the operator's name in their matching regexes, plus a header comment describing a real leak by naming a private community and two employers. Every one of those files was "clean".
 - **A private noun that is new.** The list is a lagging indicator: it contains what has leaked before, not what is about to.
 
 So run the scan, and then **read what you are about to publish**. Budget for reading, not just scanning; a curated set of files that a human has read beats a large set that only a regex has cleared. Treat a scan result as "no known-bad strings found", which is exactly what it is, and never as "safe to publish".
@@ -139,26 +139,36 @@ Two mechanical consequences worth building in:
 - **Make the operator's name a variable, never a literal**, in any tool that ships to a public repo. A gate that hardcodes who it is protecting leaks that person by existing.
 - **A gate needs an exemption path.** Repos legitimately contain secret-shaped strings: placeholder credentials in docs, a vendor's published example key, a scanner's own test fixture. Without a narrow allowlist those fire every run, and a warning nobody can act on trains people to ignore the gate. Exempt the specific line, never the pattern, and make the self-test **ignore the allowlist** so that exempting a fixture cannot silently turn the gate into a no-op.
 
+### Personal source material is its own leak class
+
+A public tool's *input data* is published exactly as widely as its code, and the failure mode is committing that data because the repo's data directory defaults to tracked. An audit found a public eval harness carrying, as committed task definitions, the personal source material its tasks consumed: voice-matching samples drawn from real correspondence, application material, personal profile context. None of it is a credential; no secret scan or identifier list fires on any of it, because it is content, not a key.
+
+Rules that follow:
+
+- **Voice samples, resume/application text, own-project fixtures, and personal profile or purchasing context live in your private context repo, full stop**, even when a public tool needs to read them. Symlink them into the public checkout; the tool cannot tell the difference.
+- **When a public repo has a directory whose entries are authored data (tasks, fixtures, corpora), default-deny it in `.gitignore` and allowlist the public entries by name** (`tasks/*` then `!tasks/<public-example>`). A new entry is then invisible to git until publishing it is a deliberate act. Tracked-by-default is how the data leaked: nobody decided to publish it, it just landed where everything else landed.
+- **Deleting the files does not unpublish them.** They remain in git history on the remote; removal needs a history rewrite (see "History Rewriting" below) and that is a separate, explicitly-approved decision.
+
 ## Public repo commits are anonymous; the private repo carries the attribution
 
 **A commit message is published exactly as widely as the diff.** It is on the commits page, in the Atom feed, in the search index, and in every `git log` a cloner runs. Writing one is a publishing act, and the audit habit ("read every line of `git diff --staged`") has to cover the message too.
 
 The split, which applies to guidance files and commit messages alike:
 
-| Public repo | Your private context repo |
+| Public repo | Private context repo |
 |---|---|
 | The rule, stated impersonally | Who asked for it, and their exact words |
 | The failure mode and how it was detected | The people, employers, and rooms involved |
-| The mechanism (API call, exit code, flag) | The account, sheet, channel, request id, message link |
+| The mechanism (API call, exit code, flag) | The account, sheet, channel, req id, message link |
 | "A tracking sheet's source column" | Which sheet, which column |
 
-Public text names **roles and shapes**, not **identities**: `a poster`, `one employer`, `a private community`, `<community> #<channel> (<poster>)`. That is enough for the rule to be followable by anyone; the private file supplies the lookup when your environment needs to act on it. Link the two so neither is orphaned: the public section ends with a pointer to the private file, and the private file names its public counterpart.
+Public text names **roles and shapes**, not **identities**: `a poster`, `one employer`, `a private community`, `<community> #<channel> (<poster>)`. That is enough for the rule to be followable by anyone; the private file supplies the lookup when *your* environment needs to act on it. Link the two so neither is orphaned: the public section ends with a pointer to the private file, and the private file names its public counterpart.
 
 **What must never reach a public commit (message or diff):**
-- A directive quoted and attributed: `<name>, <date>: "<what they said>"`. State the rule the directive produced. Attribution is what turns an ordinary preference into a published statement about a person.
+- A directive quoted and attributed: `<name>, <date>: "<what they said>"`. State the rule the directive produced. Attribution is what makes an ordinary preference into a published statement about a person.
 - Names of individuals who are not the repo owner: posters, recruiters, hiring managers, referrers, interviewers. Third parties did not opt into the commit log.
 - Private community and channel names, and message permalinks. A workspace name plus a channel identifies a membership list.
-- Employers applied to or interviewed with, and ATS request ids. A job search is private; a commit log that names targets reconstructs it in date order.
+- Employers the owner has applied to or interviewed with, and ATS req ids. A job search is private; a commit log that names targets reconstructs it in date order.
 
 ### Every publish path, not just the commit
 
@@ -170,25 +180,25 @@ A repo publishes through more surfaces than `git push`, and each one is a separa
 | Commit message | commit-msg hook |
 | Pushed diff | pre-push hook |
 | PR/issue/release title and body, comments | a PreToolUse guard on Bash that inspects `gh` write commands |
-| Already-published history | a retroactive exposure-sweep script |
+| Already-published history | a retroactive exposure sweep script |
 
-`gh pr create --body "…"` posts straight to the GitHub API. No commit happens, so no commit gate ever sees it, and automation that opens PRs on a public repo hits this path on every run. Keep the shared checks in one library that all of these source, rather than three drifting copies.
+`gh pr create --body "…"` posts straight to the GitHub API. No commit happens, so no commit gate ever sees it, and any automation that opens PRs on a public repo does this on every run. Keep the shared checks in one sourced library so all of these enforce one definition rather than three drifting copies.
 
-**A gate that cannot find its own library must say so.** These gates should fail open when the shared check library is missing, because breaking every commit on the machine is worse than missing one check, but they must print a warning when they do. A silent fail-open is indistinguishable from a pass; a refactor of the commit-msg hook once disabled two gates for exactly that reason, before the warning existed.
+**A gate that cannot find its own library must say so.** These gates should fail open when the shared library is missing, because breaking every commit on the machine is worse than missing one check, but they must print a warning when they do. A silent fail-open is indistinguishable from a pass; a refactor of the commit-msg hook disabled two gates for exactly that reason before the warning existed.
 
 ### Employer and person names: why there is no pattern for them
 
-Third-party names, employers under application, and request ids are forbidden in public repos but should **not** be added to the blocked-identifier list, and that is deliberate. Real company names double as ordinary English words, product names, and public repo names, so adding them as global patterns produces a gate that fires constantly on nothing, and a gate people learn to bypass protects nothing.
+Third-party names, employers under application, and req ids are forbidden in public repos but are **not** in the blocked-identifier list, and that is deliberate. Company names are frequently ordinary words or products you legitimately mention. Adding them as global patterns produces a gate that fires constantly on nothing, and a gate people learn to bypass protects nothing.
 
 What is enumerable is blocked: private community names, message permalinks, private repo names. What is not enumerable gets three weaker defences that add up:
 
 - **Write-time generalisation.** The rule above. This is the one that actually works.
 - **A shape check with no name list**: match the *grammar* of an attributed directive, not who is named in it, so it catches new people automatically.
-- **Corporate email domains**, which have no ambiguity: `someone@<employer>.com` in a public repo is always a finding. A retroactive sweep for these is what found a follow-up email containing two employees' work addresses sitting in a public portfolio repo, three months after it was committed.
+- **Corporate email domains**, which have no ambiguity: `someone@<employer>.com` in a public repo is always a finding. A retroactive sweep checking for these is what found a follow-up email with two employees' work addresses sitting in a public portfolio repo, three months after it was committed.
 
-**Enforcement, and its limit.** The commit-msg gate blocks the enumerable half (identifier patterns via the scanner, plus the quoted-directive shape) on public repos only, since attribution is exactly what private repos are *for*. It cannot enumerate people and employers: those change weekly and a pattern list will always trail them. **Generalise at write time.** The gate is a backstop for the cases someone already thought of, not a substitute for deciding what the sentence is allowed to say.
+**Enforcement, and its limit.** A commit-msg hook can block the enumerable half (identifier patterns plus the quoted-directive shape) on public repos only, since attribution is exactly what private repos are *for*. It cannot enumerate people and employers: those change weekly and a pattern list will always trail them. **Generalise at write time.** The gate is a backstop for the cases someone already thought of, not a substitute for deciding what the sentence is allowed to say.
 
-This was written after a public commit put a quoted directive, a private chat community, a named third party, and two employers on the public commits page, in the message *and* the diff. The content-only pre-commit hook had nothing to say about the message, and the identifier list had no category for people or closed rooms.
+This was written after a public-repo commit put a quoted directive, a private chat community, a named third party, and two employers on the public commits page, in the message *and* the diff. The content-only pre-commit hook had nothing to say about the message, and the identifier list had no category for people or closed rooms.
 
 ## AI Chat Export Files
 
@@ -199,84 +209,89 @@ AI chat exports are a high-risk PII vector. Export files routinely contain:
 
 Never commit raw AI chat exports to any repository. If reference material from an AI conversation is needed:
 1. Extract only the relevant content into a new file
-2. Scrub any sidebar or metadata content before committing
-3. Add the export directory to `.gitignore` (e.g., `Reference Files/`)
+2. Scrub any sidebar/metadata content before committing
+3. Add the export directory to `.gitignore`
 4. If the full export is needed for agent access, store it in your private context repo
 
-This pattern caused a real incident: chat exports with medical and psychiatric chat titles were committed to a public repo and had to be emergency-removed.
+This pattern caused a real incident: exports carrying medical and psychiatric chat titles were committed to a public repo and had to be emergency-removed.
 
 ## Automated Security Hooks (Pre-Commit + Pre-Push)
 
-All public repos MUST have both pre-commit and pre-push hooks installed. These scan for sensitive identifiers before code reaches the remote.
+All public repos should have both pre-commit and pre-push hooks installed. These scan for sensitive identifiers before code reaches the remote.
 
 ### Hook Files
 
-- a pre-commit hook that scans staged diffs at commit time
-- a pre-push hook that scans all commits being pushed (catches amended commits, rebases, and cherry-picks that bypassed pre-commit)
-- an installer that puts both hooks into one or all public repos
+- `hooks/git-pre-commit`: scans staged diffs at commit time
+- `hooks/git-pre-push`: scans all commits being pushed (catches amended commits, rebases, cherry-picks that bypassed pre-commit)
+- `hooks/install-hooks.sh`: installs both hooks to one or all public repos
 
 ### How They Work
 
-- **Pre-commit:** Pipes `git diff --cached` through the identifier scanner. Blocks if any sensitive identifier is found.
-- **Pre-push:** Determines the commit range being pushed, checks whether the repo is public (via `gh repo view --json isPrivate`), and scans the full diff. Only enforces on public repos; private repos pass through.
+- **Pre-commit:** Pipes `git diff --cached` through your identifier scanner. Blocks if any sensitive identifier is found.
+- **Pre-push:** Determines the commit range being pushed, checks if the repo is public (via `gh repo view`), and scans the full diff. Only enforces on public repos; private repos pass through.
 
 ### Installation
 
 ```bash
-# Install to a single repo
-bash hooks/install-hooks.sh "$HOME/<repo>"
-
-# Install to all local public repos + set up the global git template
+# Install to all local public repos + set up global git template
 bash hooks/install-hooks.sh --all-public
+
+# Install to a single repo
+bash hooks/install-hooks.sh ~/repos/myrepo
 ```
 
-Point the global template directory (`git config --global init.templateDir ~/.git-templates`) at a hooks directory containing both, so any newly cloned repo automatically gets them.
+The `--all-public` flag also configures `~/.git-templates/hooks/` as the global git template directory, so any newly cloned repo automatically gets both hooks.
 
 ### For Agents
 
-When creating a new public repo, or cloning one that doesn't have hooks yet, run the installer against that repo path before the first commit.
+When creating a new public repo or cloning one that doesn't have hooks yet, run:
+```bash
+bash hooks/install-hooks.sh ~/<repo>
+```
 
-**Why:** Hardcoded VM credentials once survived in a public repo for months because only pre-commit hooks existed, and only on one repo. Pre-push hooks on all public repos would have caught it at push time regardless of which repo it happened in.
+**Why:** A public repo once carried hardcoded VM credentials for months because only pre-commit hooks existed, and only on one repo. Pre-push hooks on all public repos catch this at push time regardless of which repo it happens in.
 
 ### Legitimate `--no-verify` for Security Redactions
 
-The hooks scan the full `git diff`, including removed lines. When you are *removing* a sensitive identifier (redacting), the removed line still contains the identifier and triggers the hook. This is a known catch-22: the hook blocks the very commit that fixes the problem.
+The hooks scan the full `git diff`, including removed lines. When you're *removing* a sensitive identifier (redacting), the removed line still contains the identifier and triggers the hook. This is a known catch-22: the hook blocks the very commit that fixes the problem.
 
 **`--no-verify` is acceptable** when all of these are true:
 1. The commit is purely a security redaction (removing or replacing sensitive identifiers)
 2. The removed lines are the only hook violations (no new identifiers being added)
-3. The commit message explicitly states the bypass reason (e.g., "Security remediation: --no-verify used because the pre-commit hook flags the removal lines")
+3. The commit message explicitly states the bypass reason (e.g., "Security remediation: --no-verify used because pre-commit hook flags the removal lines")
 
-This pattern was validated across seven or more repos during an infrastructure redaction sweep.
+This pattern was validated across 7+ repos during an infrastructure redaction sweep.
 
 ## Pre-Commit Checklist (Manual Fallback)
 
 When the automated hook isn't installed, verify before committing to any public repo:
 
 1. `grep -rn 'ssh.*@\|BEGIN.*KEY\|api.key\|webhook' .`: no secrets in staged files
-2. No IP addresses in code: `grep -rn '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' .`
+2. No IP addresses in code (check: `grep -rn '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' .`)
 3. No absolute paths to home directories
 4. No private repo names or usernames in test fixtures, docs, or comments (check against your private reference database)
 5. `.gitignore` covers `.env*` files
 6. Config files use environment variables, not hardcoded values
-7. `git remote -v`: no credentials embedded in remote URLs (see below)
+7. `git remote -v`: no credentials embedded in remote URLs (see "Credentials in Git Remote URLs" below)
 
 ## Credentials in Git Remote URLs
 
-Using an HTTPS remote with an embedded PAT (`https://<token>@github.com/user/repo.git`) stores the token in `.git/config` in plaintext, visible in `git remote -v`, in shell history, and to any process that reads the config.
+Using an HTTPS remote with an embedded PAT (`https://<token>@github.com/user/repo.git`) stores the token in `.git/config` in plaintext, visible in `git remote -v`, shell history, and any process that reads the config.
 
 **Correct approaches:**
 - Use SSH remotes: `git remote set-url origin git@github.com:user/repo.git`
-- Or use the git credential store or a credential helper, so no token is in the URL
+- Or use the git credential store / helper, with no token in the URL
 
 **If already set:** Rotate the PAT immediately (it was already exposed), then re-set the remote: `git remote set-url origin git@github.com:user/repo.git`
 
-**How it happens:** `git clone https://<token>@github.com/...` bakes the token into `.git/config`; CI automation that sets remotes directly does the same. This has happened in practice on a server checkout, where a live PAT sat visible in the remote URL until it was rotated. Check all remotes with `git remote -v` before considering a repo clean.
+**How it happens:** `git clone https://<token>@github.com/...` bakes the token into `.git/config`; CI automation that sets remotes directly does the same. Check all remotes with `git remote -v` before considering a repo "clean."
+
+A documented incident: a server's git remote was set as `https://<token>@github.com/...`, and the PAT was live and visible until rotated.
 
 ## Architecture Documentation
 
 When documenting internal systems in a public repo:
-- Describe the **pattern** ("reverse SSH tunnel to a local machine"), not the **specifics** (`ssh -p 2222 user@1.2.3.4`)
+- Describe the **pattern** ("reverse SSH tunnel to local machine"), not the **specifics** (`ssh -p 2222 user@1.2.3.4`)
 - Use generic terms: "cloud VM", "local machine", "the bot", not hostnames or IPs
 - Keep incident details focused on the **lesson**, not the infrastructure layout
 - If specifics are needed, put them in a private repo or local notes
@@ -285,14 +300,14 @@ When documenting internal systems in a public repo:
 
 `context.md`, `CLAUDE.md`, and deploy scripts in public repos must NOT include:
 - **Server filesystem paths** (`/var/www/...`, `/opt/...`, `/home/deploy/...`)
-- **Process-manager process names and port assignments** (maps the full service architecture)
+- **Process manager process names and port assignments** (maps the full service architecture)
 - **Internal API endpoint URLs** (e.g., `https://domain/api/internal-service/`)
 - **SSH aliases or VM connection patterns** (e.g., `ssh myvm 'grep TOKEN ...'`)
-- **Production health check URLs** with full domain and path
+- **Production health check URLs** with full domain+path
 - **References to private companion repos** by name (e.g., `project-private/`)
 - **Process-to-repo mappings** (reveals which GitHub repos power which services)
 
-**Instead:** Point at your private context repo's infrastructure notes. Infrastructure details belong there, and it is never public. For scripts that need these values at runtime, use environment variables with `:?` guards (fail loudly if unset) or source them from the private repo.
+**Instead:** Point to a private file ("see the infrastructure notes in your private context repo"). Infrastructure details belong in the private repo, which is never public. For scripts that need these values at runtime, use environment variables with `:?` guards (fail loudly if unset) or source from private files.
 
 **Common violation patterns in deploy scripts:**
 ```bash
@@ -315,14 +330,16 @@ curl -sf "$HEALTH_URL" > /dev/null
 - Port: 8080 (production), 5000 (dev)
 
 # GOOD:
-- Deploy details: see the private context repo's infrastructure notes (myapp row)
+- Deploy details: see the private infrastructure notes (myapp row)
 ```
 
 ## History Rewriting: Techniques and Collateral Damage
 
 ### Installation: git-filter-repo Path Gotcha
 
-`git-filter-repo` installed via pip does **not** always register as a git subcommand. Running `git filter-repo` fails with "not a git command" unless the binary is on `$PATH`. A common install location is `~/.local/bin/git-filter-repo`, which is often not on `PATH`. Invoke it directly:
+`git-filter-repo` installed via pip does **not** always register as a git subcommand. Running `git filter-repo` will fail with "not a git command" unless the binary is on `$PATH`.
+
+A common location is `~/.local/bin/git-filter-repo`. Invoke it directly:
 
 ```bash
 ~/.local/bin/git-filter-repo --invert-paths --path <file> --force
@@ -332,7 +349,7 @@ To check: `which git-filter-repo || ls ~/.local/bin/git-filter-repo`
 
 ### Email-Only Rewrites with Mailmap
 
-To change commit author and committer emails without touching file content (for example, removing personal emails from public repo history), use `--mailmap`:
+To change commit author/committer emails without touching file content (e.g., removing personal emails from public repo history), use `--mailmap`:
 
 ```bash
 # 1. Unshallow first: filter-repo refuses to run on shallow clones
@@ -345,7 +362,7 @@ echo "Name <new@email.com> <old@email.com>" > /tmp/mailmap
 git filter-repo --mailmap /tmp/mailmap --force
 ```
 
-This is the right tool when a security scan flags personal emails in commit metadata. It does not touch file content, so collateral damage risk is minimal compared to `--replace-text`.
+This is the right tool when `npm audit` or security scans flag personal emails in commit metadata. It does not touch file content, so collateral damage risk is minimal compared to `--replace-text`.
 
 ### Collateral Damage from Content Rewrites
 
@@ -357,16 +374,16 @@ This is the right tool when a security scan flags personal emails in commit meta
 **After any history rewrite:**
 1. Diff the working tree against what you expect: `git diff HEAD` should be empty, but check for `REDACTED_` artifacts in non-secret locations.
 2. Run every script that changed. Syntax checks (`bash -n`) catch parse errors but not broken runtime behavior.
-3. Check that gitignored files (`.env`, caches, state files) survived: `git reset --hard` and `git filter-repo` both wipe untracked and ignored files. Re-deploy them.
-4. Verify on every machine the repo is cloned to (local and remote). A hard reset on a server to match the rewritten remote will wipe gitignored `.env` files there too.
+3. Check that gitignored files (`.env`, caches, state files) survived: `git reset --hard` and `git filter-repo` both wipe untracked/ignored files. Re-deploy them.
+4. Verify on every machine the repo is cloned to (local and remote hosts). A hard reset on a server to match the rewritten remote will wipe gitignored `.env` files there too.
 
-**Scope replacements narrowly.** Replace the full string (the complete webhook URL) rather than substrings that appear in innocent contexts (a username that is also part of standard paths).
+**Scope replacements narrowly.** Replace the full string (e.g., the complete webhook URL) rather than substrings that appear in innocent contexts (e.g., a username that's also part of standard paths).
 
 ## Push-Forbidden Archive Repos
 
-Some repos on disk are deliberately local-only archives: pre-sanitization backups, forensic copies, or experimental trees whose history must never reach a remote. These repos often carry `CLAUDE.md` annotations like "NEVER PUSH" or "local-only archive". But the `origin` remote may still be configured and point at a live GitHub repo.
+Some repos on disk are deliberately local-only archives: pre-sanitization backups, forensic copies, or experimental trees whose history must never reach a remote. These repos often carry `CLAUDE.md` annotations like "NEVER PUSH" or "local-only archive." But the `origin` remote may still be configured and point at a live GitHub repo.
 
-**The trap:** A session read a suggestion mentioning "3 copies of a file" and applied a fix to all three repos, including a local archive. The push was rejected only because another push from the real checkout had already used the same branch name seconds earlier, a coincidence that prevented the archive's pre-sanitization history (30+ commits with unsanitized secrets) from reaching the public repo. No safety mechanism stopped it.
+**The trap:** A session read a suggestion mentioning "3 copies of a file" and applied a fix to all three repos, including the local archive. The push was rejected only because another push from the real checkout had already used the same branch name seconds earlier, a coincidence that prevented the archive's pre-sanitization history (30+ commits with unsanitized secrets) from reaching the public repo. No safety mechanism stopped it.
 
 **Required when designating a repo as push-forbidden:**
 ```bash
@@ -386,25 +403,25 @@ Disconnecting but keeping the remote name is not sufficient: a remote still list
 
 ## When a Secret is Accidentally Committed
 
-1. **Rotate immediately.** The secret is compromised the moment it's pushed.
-2. **Rewrite history.** Use `git filter-repo` to remove it from all commits.
-3. **Force-push** to update the remote.
-4. **Verify the rewrite:** `git log --all -p | grep <secret>` should return 0 matches.
-5. **Check for collateral:** grep for `REDACTED_` in the working tree; fix any unintended replacements.
-6. **Restore gitignored files.** `.env` files, caches, and state files are wiped by history rewrites and hard resets; re-deploy them to all machines.
-7. **Re-verify functionality.** Run every affected script on every machine; don't trust syntax checks alone.
-8. **Check the host's cache.** PRs, issues, and cached pages may still show the secret.
+1. **Rotate immediately**: the secret is compromised the moment it's pushed
+2. **Rewrite history**: `git filter-repo` to remove from all commits
+3. **Force-push**: update the remote
+4. **Verify the rewrite**: `git log --all -p | grep <secret>` should return 0 matches
+5. **Check for collateral**: grep for `REDACTED_` in the working tree; fix any unintended replacements
+6. **Restore gitignored files**: `.env` files, caches, and state files are wiped by history rewrites and hard resets; re-deploy them to all machines
+7. **Re-verify functionality**: run every affected script on every machine; don't trust syntax checks alone
+8. **Check the host's cache**: PRs, issues, and cached pages may still show the secret
 
 ## Never interpolate a credential into a log line, even to report presence
 
 `${VAR:+yes}${VAR:-no}` looks like a boolean and is not:
 
-- `${VAR:+yes}` gives `yes` when set
-- `${VAR:-no}` gives **the value of VAR** when set; `no` only when UNSET
+- `${VAR:+yes}` → `yes` when set
+- `${VAR:-no}` → **the value of VAR** when set; `no` only when UNSET
 
 So when the variable IS set, the pair prints `yes<THE ACTUAL VALUE>`. Written to report "is this configured?", it prints the secret.
 
-This has been hit in a cron wrapper: it echoed two API keys into a transcript, and the same line would have written both into a persistent log file on any partial-config run. Both required rotation.
+Bit in a cron wrapper: it echoed two credentials into a transcript, and the same line would have written both into a persistent log file on any partial-config run. Both required rotation.
 
 ```bash
 # WRONG -- prints the value when set
@@ -423,45 +440,34 @@ API_KEY="SENTINEL123" ; <the log line> | grep -q SENTINEL123 && echo "LEAKS"
 
 This generalises: presence is a boolean, so compute the boolean and log that. A credential variable should never appear inside a format string at all.
 
-### A blocking gate with no write-time counterpart guarantees a backlog of unpublishable files
+## A blocking gate with no write-time counterpart guarantees a backlog of unpublishable files
 
-A secret or identifier gate that only BLOCKS, with nothing that REDACTS at write time, does not prevent leaks: it converts them into a growing pile of files that can never be committed. One automated content generator reached 29 stuck posts this way, and kept adding more every session.
+A secret/identifier gate that only BLOCKS, with nothing that REDACTS at write time, does not prevent leaks: it converts them into a growing pile of files that can never be committed. One content generator reached 29 stuck posts this way, and kept adding more every session.
 
 Three failure modes, all of which have to be fixed together:
 
-1. **No redactor.** The scanner decided what was blocked but nothing decided what content should be replaced WITH. Fix: a redaction script that reads the *same* identifier list as the scanner, so the gate and the redactor cannot drift into "redacted but still blocked". Invariant worth testing: every pattern in the machine-parseable pattern list has a corresponding replacement entry.
+1. **No redactor.** The scanner decided what was blocked but nothing decided what content should be replaced WITH. Fix: a redaction script that reads the *same* identifier list the scanner reads, so the gate and the redactor cannot drift into "redacted but still blocked". Invariant worth testing: every pattern in the machine-parseable pattern list has a redaction-replacement entry.
 
 2. **Swallowed failure.** The generator ran `git commit ... 2>/dev/null || true`. Every gate rejection was discarded, so the backlog grew invisibly for days. A gated write must log its rejection somewhere a human or agent will see it.
 
-3. **Shared index.** The hook ran `git add` then a bare `git commit`, so one dirty file blocked every other session committing in the same checkout. Fix: `git add -- <path>` followed by `git commit -- <path>`. A path-limited commit builds a temporary index, so the pre-commit hook sees only that path, and a peer commit's work is neither swept in nor blocked. Verify this with a test.
+3. **Shared index.** The hook ran `git add` then a bare `git commit`, so one dirty file blocked every other session committing in the same checkout. Fix: `git add -- <path>` followed by `git commit -- <path>`. A path-limited commit builds a temporary index, so the pre-commit hook sees only that path and a peer commit's work is neither swept in nor blocking. Verify this with a test.
 
-Corollary for allowlists: an allowlist file is itself scanned. Explaining an exemption by naming the other blocked identifiers makes the allowlist uncommittable. Describe them ("its hostname, IP and deploy paths"); do not name them.
+Corollary for allowlists: an allowlist file (`.security-scan-allow` or equivalent) is itself scanned. Explaining an exemption by naming the other blocked identifiers makes the allowlist uncommittable. Describe them ("its hostname, IP and deploy paths"), do not name them.
 
-Corollary for redaction targets: replacement values are read by humans in published prose. Use `/var/www/app`, not a "(see the private repo)" note.
+Corollary for redaction targets: replacement values are read by humans in published prose. Use `/var/www/app`, not a "(see the private notes)" pointer.
 
-### Gate every publish path: PR and issue text bypasses all three commit gates
+## GitHub repo description, topics, and homepage never pass through git
 
-A repo publishes through more surfaces than `git push`. The commit path had three gates (pre-commit on content, commit-msg on the message, pre-push on the diff); PR and issue text had none, because `gh pr create --body` posts straight to the API without a commit. Gate it with a PreToolUse guard on Bash (public repos only), with the shared checks in one library so the gates cannot drift.
+A repo's GitHub description, topics and homepage are published text that never passes through git. All three commit gates are blind to them: pre-commit scans content, commit-msg scans the message, pre-push scans the diff, and none sees a field set through the API or web UI. A PreToolUse guard on `gh` writes gates anonymity, not accuracy, and only on commands a session actually runs.
 
-Two traps found while building it:
+Found in one audit: a public mirror repo rebuilt two days earlier still described itself as the superseded thing that rebuild threw out. That string is the first line a visitor reads and the meta description search engines index.
 
-1. A hook that resolves its shared library by absolute path only takes the fail-open branch when run from a worktree, so BOTH gates silently passed everything and the test suite reported green. Fail-open is right (breaking every commit is worse) but it must WARN; a silent fail-open is indistinguishable from a pass.
-2. Employer and person names must NOT become global blocklist patterns; real company names collide with ordinary words and with public repo names. Blanket patterns build a gate people learn to bypass. Enumerable things get blocked; the rest gets write-time generalisation, a name-free shape check, and a corporate-email-domain check.
-
-Back this with a retroactive exposure-sweep script. That is what found the real thing the hooks could never have caught: a follow-up email with two employees' work addresses in a public portfolio repo, three months after commit.
-
-### GitHub repo description, topics, and homepage never pass through git, so no commit gate can see them
-
-A repo's GitHub description, topics, and homepage are published text that never passes through git. All three commit gates are blind to them: pre-commit scans content, commit-msg scans the message, pre-push scans the diff, and none sees a field set through the API or web UI. A PreToolUse metadata guard gates `gh` writes for anonymity, not accuracy, and only on commands a session actually runs.
-
-Found in practice: a public mirror repo rebuilt two days earlier still described itself as the superseded design that rebuild threw out. That string is the first line a visitor reads and the meta description search engines index.
-
-When a repo's SHAPE changes (rebuild, scope change, rename, public/private flip), treat the description as a separate artifact to update; no gate will remind you. Check with:
+When a repo's SHAPE changes (rebuild, scope change, rename, public/private flip), treat the description as a separate artifact to update; no gate will remind you.
 
 ```bash
-gh repo view --json description,homepageUrl,repositoryTopics
+gh repo view <owner>/<repo> --json description,homepageUrl,repositoryTopics
 ```
 
 Verify a change landed by fetching the anonymous page's meta description, not just the API.
 
-Sibling rule: a repo going private silently breaks every public link to it. The check is a visibility sweep (`gh repo view --json isPrivate` over everything linked), not a liveness sweep, because a private repo returns a real 404 that a liveness checker correctly calls dead without telling you it used to work.
+Sibling: a repo going private silently breaks every public link to it. The check is a visibility sweep (`gh repo view --json isPrivate` over everything linked), not a liveness sweep, because a private repo returns a real 404 that a liveness checker correctly calls dead without telling you it used to work.
