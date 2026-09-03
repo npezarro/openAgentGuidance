@@ -1,13 +1,13 @@
 <!-- Load when: several sessions share one checkout; worktrees, resource locks, claim-guard, "it keeps reverting" -->
 # Concurrent Sessions on the Same Repo
 
-Several agent sessions can run in one home directory at once (this guidance was written against a setup running seven live), often with permission prompts disabled and all sharing one checkout per repo. Collisions recur, and each detection-only fix narrows the window without closing it.
+Several agent sessions can run in one home directory at once (seven live, in one observed case), all with permission prompts skipped, all sharing one checkout per repo. Collisions recur, and each narrow fix closes the window without closing the class.
 
 **The reason it keeps recurring: this is two problems, and one mechanism was being asked to solve both.**
 
 | | Problem A: shared working tree | Problem B: singletons |
 |---|---|---|
-| What | N sessions, one checkout. Index + working tree are mutable shared state with no ownership. | A web root, a process-manager service, a live browser extension, a shared skills directory, a deploy host. Exactly one exists. |
+| What | N sessions, one checkout. Index + working tree are mutable shared state with no ownership. | A web root, a process-manager service, a live browser extension, a shared skills directory, a remote host. Exactly one exists. |
 | Symptom | `git add -A` commits someone else's uncommitted work; two sessions commit the same file seconds apart. | One session's deploy overwrites another's; two extension reloads tear down each other's service worker. |
 | Right fix | **Eliminate the sharing** (per-session git worktrees). | **Serialize** (a real lock) or **partition** (one owner per path). |
 | Wrong fix | Detection. It can only narrow the race. | Advisory warnings. You can proceed past them, so nothing is serialized. |
@@ -16,7 +16,7 @@ A claim-detection hook is good at what it does and does catch real hazards, but 
 
 ## Problem A: use a worktree per session
 
-If your harness offers worktree-entry tooling, it looks roughly like:
+If your harness offers a worktree tool:
 
 ```
 EnterWorktree                 # creates .claude/worktrees/<name> on a new branch
@@ -24,7 +24,7 @@ EnterWorktree                 # creates .claude/worktrees/<name> on a new branch
 ExitWorktree { action: keep|remove }
 ```
 
-**Such a tool is often unavailable, and a rule must not assume it.** It typically requires the SESSION cwd to be inside a git repo, but sessions are routinely launched from a directory that is not a repo, and they routinely span several repos at once. An instruction that cannot be followed is worse than none: it gets silently skipped, and that erodes the rest of the file.
+**Such a tool is often unavailable, and a rule must not assume it.** It typically requires the SESSION cwd to be inside a git repo, but sessions are often launched from a non-repo directory and routinely span several repos at once. An instruction that cannot be followed is worse than none: it gets silently skipped, and that erodes the rest of the file.
 
 The mechanism is git worktrees; the tool is one convenience wrapper. From anywhere:
 
@@ -38,7 +38,7 @@ Verified from a non-repo cwd: the worktree was created, a path-keyed write guard
 
 Then there is no other session's uncommitted work in your tree, so `git add -A` is safe **by construction** and the whole class disappears.
 
-Why this is cheap, contrary to expectation: worktrees live under `.claude/worktrees/`, so the canonical repo path **stays exactly where it is**. Crontab lines and process-manager config files that hardcode absolute repo paths keep working untouched. They get better, in fact: crons start running against a clean committed tree instead of one that several sessions are mid-edit on.
+Why this is cheaper than expected: worktrees live under `.claude/worktrees/`, so the canonical checkout **stays exactly where it is**. Any cron lines and process-manager config files that hardcode the canonical repo path keep working untouched. They get better, in fact: crons start running against a clean committed tree instead of one that several sessions are mid-edit on.
 
 Real costs, stated honestly:
 - Each session ends with a merge back to the default branch. Added ceremony for solo work.
@@ -46,7 +46,7 @@ Real costs, stated honestly:
 - Zero help for Problem B.
 - Separate clones are unaffected either way. A second checkout on another OS or filesystem is still its own clone and still has to be pulled before you act on it.
 
-### Make the ignore rule GLOBAL, no per-repo step needed
+### Make the ignore rule GLOBAL, not per-repo
 
 ```bash
 git config --global core.excludesFile ~/.gitignore_global   # contains .claude/worktrees/
@@ -54,7 +54,7 @@ git config --global core.excludesFile ~/.gitignore_global   # contains .claude/w
 
 Set it on every machine you work from, and mirror the file in your private context repo.
 
-Originally this was a per-repo `.gitignore` line, which does not scale: in one survey **118 of 123 repos lacked it**, and adding it to each would have meant 118 commits across repos other sessions are live in. One global config covers every repo including ones created later. Verified in a repo with no local entry: `git status` stayed clean with a worktree open, and `git check-ignore` attributed the match to the global file.
+Per-repo `.gitignore` lines do not scale: in one fleet, 118 of 123 repos lacked it, and adding it to each would have meant 118 commits across repos other sessions are live in. One global config covers every repo including ones created later. Verified in a repo with no local entry: `git status` stayed clean with a worktree open, and `git check-ignore -v` attributed the match to the global file.
 
 Caveat: a global excludes file is machine-local and not shared with collaborators. Fine for a solo multi-machine setup; a repo with outside contributors still wants the committed line. Repos that already carry it locally keep it, harmlessly.
 
@@ -81,23 +81,23 @@ Same command that captured another session's work, now inert.
 
 ### Two hook fixes worktrees REQUIRE
 
-Worktrees are invisible to a naive push gate, so a session can commit in one, never merge, and stop with no warning at all: trading a loud problem (clobber, which you notice) for a silent one (stranded work, which you do not). Two independent causes, both of which your unpushed-work check must handle:
+Worktrees are invisible to a naive push gate, so a session can commit in one, never merge, and stop with no warning at all: trading a loud problem (clobber, which you notice) for a silent one (stranded work, which you do not). Two independent causes, both worth fixing in any unpushed-work check:
 
 - `.git` is a **directory** in a normal checkout but a **file** in a linked worktree, so a `-d` entry test skips every worktree ledger entry.
 - A worktree branch has **no upstream**, so `@{u}` fails and the unpushed check is skipped. Compare against origin's default branch instead, because for such a branch the question is not "pushed to my upstream" but "does this work exist on the remote yet".
 
 ### What NOT to do: collapsing a worktree onto its canonical repo
 
-Tempting (a claim guard keys ledgers on repo root, so a worktree looks like a separate repo), and wrong twice over. Tried and reverted:
+Tempting (claim ledgers key on repo root, so a worktree looks like a separate repo), and wrong twice over. Tried and reverted:
 
-- The ledger would key on the canonical root while the file lives in the worktree, so the relative path resolves to `.claude/worktrees/<name>/…`, which is **gitignored there** and reports clean. Dirty worktree files would look committed.
+- The ledger would key on the canonical root while the file lives in the worktree, so `rel_path` resolves to `.claude/worktrees/<name>/…`, which is **gitignored there** and reports clean. Dirty worktree files would look committed.
 - Two sessions in separate worktrees genuinely **cannot** clobber each other's working tree, so cross-warning them is a false positive. Per-working-tree scoping is correct.
 
-One related subtlety if you touch repo-root resolution in a guard: run its `check-ignore` test against the tree the file actually lives in. Testing a worktree file against the canonical repo reports every one of them ignored (because of the global ignore entry above) and the session goes completely invisible to the guards.
+One related subtlety if you touch repo-root resolution: run its `check-ignore` test against the tree the file actually lives in. Testing a worktree file against the canonical repo reports every one of them ignored (because of the `.gitignore` entry above) and the session goes completely invisible to the guards.
 
 ### Landing a branch: never merge from the shared checkout
 
-`cd <primary> && git merge <my-branch>` merges into **whatever branch is checked out right now**, which is not necessarily the one that was there when you started. Observed: a peer session checked its own branch out in the shared tree mid-run; the merge fast-forwarded that branch instead of the default one, `git push origin <default-branch>` failed non-fast-forward, and two commits ended up sitting on somebody else's already-merged PR branch. `git status -sb` had read `## master...origin/master` twenty minutes earlier. A clean tree is not evidence the branch is the one you assumed, and re-checking is a race, not a fix.
+`cd <primary> && git merge <my-branch>` merges into **whatever branch is checked out right now**, which is not necessarily the one that was there when you started. A peer session checked its own branch out in the shared tree mid-run; the merge fast-forwarded that branch instead of the default one, the push failed non-fast-forward, and two commits ended up sitting on somebody else's already-merged PR branch. `git status -sb` had read `## master...origin/master` twenty minutes earlier. A clean tree is not evidence the branch is the one you assumed, and re-checking is a race, not a fix.
 
 Land from a worktree of the default branch instead, which cannot be moved under you:
 
@@ -114,13 +114,13 @@ If you have already merged onto a peer's branch: `git branch <keep> <your-sha>` 
 
 ### Enforcement: a PreToolUse worktree guard
 
-An advisory rule is only advisory, so back it with a `PreToolUse` hook on `Edit|Write`. Deny the **first write** to a repo when all three hold:
+An advisory rule needs a backing `PreToolUse` hook on `Edit|Write`. It should deny the **first write** to a repo when all three hold:
 
-1. the target is inside a repo under the guarded root (your repos directory, overridable by env var), **and**
+1. the target is inside a repo under the guarded root (e.g. your repos directory, overridable by env var), **and**
 2. it is not already inside `.claude/worktrees/`, **and**
 3. another **live** session has written **that same file**.
 
-**Condition 3 was originally "holds that repo", and that was wrong.** Production disagreed within ~15 minutes: two denials against a real peer with **zero overlapping files** in both cases, and that session acked both rather than taking a worktree. Repo-level co-presence is the normal state when several sessions run; it is not a collision. What it actually risks, a stage-everything commit sweeping a peer's uncommitted work, is already blocked by the claim guard's deny arm, so the wider condition bought friction and no protection.
+**Condition 3 started as "holds that repo", and that was wrong.** Production disagreed within ~15 minutes: two denials against a real peer with **zero overlapping files** in both cases, and that session acked both rather than taking a worktree. Repo-level co-presence is the normal state when several sessions run; it is not a collision. What it actually risks, a stage-everything commit sweeping a peer's uncommitted work, is already blocked by the claim guard's deny arm, so the wider condition bought friction and no protection.
 
 Two bugs surfaced while narrowing it, both worth knowing if you touch ledger matching: ledger paths are absolute but **not normalized** (a real entry contained `/./`, which fails plain equality against a realpath'd target and would have made the guard silently never fire), and an unquoted heredoc expands variables but does **not** interpret `\n`.
 
@@ -132,15 +132,15 @@ printf '%s\t%s\n' '<repo-name>' '<reason>' >> /tmp/claude-claim-ack-<sid>
 
 **Why PreToolUse and not Stop**, which is the intuitive choice: at Stop the editing has already happened in the shared checkout, so blocking cannot retroactively isolate anything; there is no remediation left, only nagging. Stop also cannot distinguish "correctly skipped" from "forgot", so it would fire on the exempt cases too and train reflexive acks. Stop's correct job here is catching work *stranded in a worktree*, i.e. "did your work escape this machine", not "did you use the workflow".
 
-Key it on the target **file path**, not `cwd`: editing an absolute canonical path from inside a worktree is still unisolated, and `cwd` would call that safe. Cover it with tests. Verified live: a real `Write` to a contested repo was blocked, the file was not created, and the ack let the retry through.
+Key it on the target **file path**, not `cwd`: editing an absolute canonical path from inside a worktree is still unisolated, and `cwd` would call that safe.
 
-**Enable it by default** for multi-edit work in your repos root. Skip for read-only work, one-file edits and ops. Apply the ignore prerequisite to any repo before working in a worktree there.
+Enable it by default for multi-edit work in your repos root. Skip for read-only work, one-file edits and ops. Apply the `.gitignore` prerequisite to a repo before working in a worktree there.
 
-**Deploys read the canonical checkout**, not your worktree: merge and push before running a deploy, or you will ship the pre-worktree code.
+**Deploys read the canonical checkout**, not your worktree: merge and push before running a deploy or an extension reload, or you will ship the pre-worktree code.
 
 ## Problem B: take a real lock
 
-A lock wrapper serializes an operation on a named singleton:
+A lock wrapper script serializes an operation on a named singleton:
 
 ```bash
 with-resource-lock.sh <resource> [--timeout N] -- <command...>
@@ -151,37 +151,37 @@ Resource naming scheme (keep it stable, the string IS the lock):
 
 | Resource | Covers |
 |---|---|
-| `deploy:<app>` | that app's web root and its process-manager service |
+| `deploy:<app>` | that app's web root and process-manager service |
 | `browser-extension` | the live browser extension: reload, debugger protocol, tab state |
-| `remote:skills` | a shared skills directory on the deploy host |
+| `remote:skills` | a shared skills directory on a remote host |
 
-Wire it in at the narrowest shared chokepoint:
+Wire the lock in at the **shared entry point**, not in per-repo scripts:
 
 | Resource | Where |
 |---|---|
-| `browser-extension` | the extension-reload command self-wraps (with an env var to opt out) |
-| `remote:skills` | the skills sync script, replacing a hand-run rsync pair; it also counts files across all copies and fails on a mismatch |
-| `deploy:<app>` | the deploy skills. Wire at the skill, not in 10+ per-repo `deploy.sh` files, because the ecosystem rule is already that deploys go through those skills |
+| `browser-extension` | the extension-reload command self-wraps (with an env-var opt-out) |
+| `remote:skills` | the skills sync script; it also counts files across all copies and fails on a mismatch |
+| `deploy:<app>` | the deploy and staging skills, not 10+ per-repo `deploy.sh` files, because the ecosystem rule is already that deploys go through those skills |
 
 ## Hygiene and monitoring
 
 **Reap stale session ledgers** (hourly cron). Sessions never clean up their `/tmp` state. Measured once: 299 files, 1.1MB, **59 alive markers for ~2 live sessions**. Two harms, neither cosmetic: the raw marker count misleads anyone who reads it, and the claim guard iterates every ledger on each qualifying command. Reap at 24h (48x the liveness window) with a hard 2h floor that refuses any shorter age, because a too-eager reap would silently blind the guards rather than fail loudly.
 
-**Run a guard-calibration report** (daily cron). Alert when a guard is being **routed around**, which is the failure nothing was watching for. The signal is the override rate, not the deny count: a guard that fires and is obeyed works; one that fires and gets overridden is indistinguishable from an absent one.
+**Run a guard-calibration report** (daily cron). Alert when a guard is being **routed around**, which is the failure nothing else watches for. The signal is the override rate, not the deny count: a guard that fires and is obeyed works; one that fires and gets overridden is indistinguishable from an absent one.
 
-Count **distinct sessions**, not log lines. One ack decision logs a line on every subsequent write, so a line-based rate inflates without bound, and a first pass nearly tuned the threshold against the test suite's own synthetic ids. First real reading:
+Count **distinct sessions**, not log lines. One ack decision logs a line on every subsequent write, so a line-based rate inflates without bound; and beware tuning the threshold against your test suite's own synthetic session ids. A first real reading looked like:
 
 ```
 worktree-guard   sessions denied=3, of which overrode=3 (100%)
 claim-guard      sessions denied=5, of which overrode=0   (0%)
 ```
 
-Every real session that hit the worktree guard routed around it. Both known causes (repo-level matching, and reading the heuristic ledger) were then fixed; until the report says otherwise, the guard is **unproven**.
+Every real session that hit the worktree guard routed around it. Once the known causes are fixed, the guard is **unproven** and this report is what says whether the fixes took.
 
-Behavior a lock wrapper should have:
-- Backed by `flock(2)`, so the kernel releases the lock when the holder exits **including on crash or SIGKILL**. A dead session can never wedge a resource.
-- Waiting past `--timeout` exits **75** (`EX_TEMPFAIL`), distinct from the wrapped command's own failures, and names the holder.
-- Re-entrant within one process tree via an env var listing held locks, so a locked script calling another locked script does not deadlock against itself.
+Lock behavior worth knowing:
+- Back it with `flock(2)`, so the kernel releases the lock when the holder exits **including on crash or SIGKILL**. A dead session can never wedge a resource.
+- Waiting past `--timeout` should exit **75** (`EX_TEMPFAIL`), distinct from the wrapped command's own failures, and name the holder.
+- Make it re-entrant within one process tree (e.g. via an env var listing held locks), so a locked script calling another locked script does not deadlock against itself.
 
 ### The gotcha a lock wrapper exists to have already solved
 
@@ -208,13 +208,13 @@ Two modes:
 
 Supporting pieces:
 
-- A write-target inference library infers which files a Bash command writes. Heredocs, redirects and `sed -i` are invisible to a `file_path` tracker, and a real near-miss happened on exactly such a write. Precision beats recall here: a bare `python3` is not a write, only one whose body writes.
-- A session heartbeat writes `/tmp/claude-session-alive-<sid>` per session (headless included). Without per-session liveness the guard fires on `/tmp` ledgers left by sessions that exited weeks ago.
-- Two ledgers: `/tmp/claude-repos-touched-<sid>` is Edit/Write only (authorship, feeds the Stop gate); `/tmp/claude-repos-claimed-<sid>` is Bash-inferred (advisory, guard only). Heuristics must never reach a gate that blocks a session's exit.
+- A **write-target inference** library infers which files a Bash command writes. Heredocs, redirects and `sed -i` are invisible to a `file_path` tracker, and a real near-miss happened on exactly such a write. Precision beats recall here: a bare `python3` is not a write, only one whose body writes.
+- A **session heartbeat** hook writes `/tmp/claude-session-alive-<sid>` per session (headless included). Without per-session liveness the guard fires on `/tmp` ledgers left by sessions that exited weeks ago.
+- **Two ledgers**: `/tmp/claude-repos-touched-<sid>` is Edit/Write only (authorship, feeds the Stop gate); `/tmp/claude-repos-claimed-<sid>` is Bash-inferred (advisory, guard only). Heuristics must never reach a gate that blocks a session's exit.
 
-**Escape hatch, because a denial must never be a dead end:** `printf '%s\t%s\n' '<target>' '<reason>' >> /tmp/claude-claim-ack-<sid>`. Denials, overrides and unresolvable targets should all land in a log you can read.
+**Escape hatch, because a denial must never be a dead end:** `printf '%s\t%s\n' '<target>' '<reason>' >> /tmp/claude-claim-ack-<sid>`. Denials, overrides and unresolvable targets all land in a guard log.
 
-**Registration.** The scripts are versioned in this repo; the wiring lives in `~/.claude/settings.json`, which is in no repo. Mirror it into your private context repo and drift-check it. The wiring looks like:
+**Registration.** The scripts are versioned in this repo; the wiring lives in `~/.claude/settings.json`, which is in no repo. Mirror it in your private context repo with a `--check` drift mode. Restore by hand with:
 
 ```jsonc
 // PreToolUse, matcher "Bash"
@@ -222,7 +222,7 @@ Supporting pieces:
 // PostToolUse, matcher "Bash|Edit|Write"  (track first, then guard)
 "bash -c 'printf \"%s\" \"$(cat)\" | bash $HOME/<repo>/hooks/track-repo-writes.sh; exit 0'"
 "bash -c 'printf \"%s\" \"$(cat)\" | bash $HOME/<repo>/hooks/claim-guard.sh warn; exit 0'"
-// PostToolUse, matcher "Bash|Edit|Write|NotebookEdit"  (was `cat >/dev/null`, must now pipe)
+// PostToolUse, matcher "Bash|Edit|Write|NotebookEdit"  (must pipe stdin, not discard it)
 "bash -c 'printf \"%s\" \"$(cat)\" | bash $HOME/<repo>/hooks/session-heartbeat.sh; exit 0'"
 ```
 
@@ -230,12 +230,12 @@ The `deny` entry deliberately omits `exit 0`: swallowing its exit code turns the
 
 ### Closed gaps
 
-- **False-positives on the command's own text.** Two uncorrelated greps meant a commit message *describing* the dangerous command was denied as if it were the command. Fix: split the command into segments (heredoc bodies dropped, `ssh <host> '<remote>'` unwrapped, string literals removed before arguments are read) and judge each segment by its own leading command and argument list. Cover it with three regression tests: quoted `-m` message, heredoc commit body, `echo` of the string.
-- **The Stop gate was repo-granular.** Fix: intersect each unpushed commit's files against this session's Edit/Write ledger, so it blocks only on commits containing files this session wrote. A peer's unpushed commits are then *reported* rather than blocked, pointing at your push-to-their-branch procedure.
+- **False-positives on the command's own text.** Two uncorrelated greps meant a commit message *describing* the dangerous command was denied as if it were the command. Fix: split the command into segments (drop heredoc bodies, unwrap `ssh <host> '<remote>'`, remove string literals before reading arguments) and judge each segment by its own leading command and argument list. Cover it with regression tests: a quoted `-m` message, a heredoc commit body, an `echo` of the string.
+- **A repo-granular Stop gate.** Fix: intersect each unpushed commit's files against this session's Edit/Write ledger, so it blocks only on commits containing files this session wrote. A peer's unpushed commits are *reported* rather than blocked, pointing at the push-to-their-branch procedure.
 
 ### Remaining gap
 
-A `cd` target built from a variable assigned in an *earlier* turn cannot be resolved (a variable assigned in the same command can be). The deny arm logs `unresolved-target` rather than passing silently, so the blind spot is auditable. The warn arm still fires on the writes themselves.
+A `cd` target built from a variable assigned in an *earlier* turn cannot be resolved (a variable assigned in the same command can be). The deny arm should log `unresolved-target` rather than passing silently, so the blind spot is auditable. The warn arm still fires on the writes themselves.
 
 ## Diagnostic order when something "keeps reverting"
 
@@ -245,23 +245,23 @@ Before blaming cache or cron: `stat` the origin file against your deploy time, t
 
 ### A `node_modules/` gitignore entry with a trailing slash does not ignore a `node_modules` symlink
 
-When you follow the worktree rule and create a worktree to run a repo's tests, the worktree has no `node_modules`. The quick fix is to symlink the main checkout's: `ln -s /path/to/repo/node_modules node_modules`.
+When you create a worktree to run a repo's tests, the worktree has no `node_modules`. The quick fix is to symlink the main checkout's: `ln -s /path/to/repo/node_modules node_modules`.
 
-That symlink is NOT covered by the near-universal `.gitignore` entry `node_modules/`. A pattern with a trailing slash matches directories only, and to git a symlink is a *blob* (mode 120000), not a directory. So `git add -A` silently stages the symlink, and it lands in the commit and the PR as a one-line file whose contents are an absolute path from your home directory.
+That symlink is NOT covered by the near-universal `.gitignore` entry `node_modules/`. A pattern with a trailing slash matches directories only, and to git a symlink is a *blob* (mode 120000), not a directory. So `git add -A` silently stages the symlink, and it lands in the commit and the PR as a one-line file whose contents are an absolute path from your home directory. `git status` shows it as an untracked *file* (`?? node_modules`), not swallowed the way a real `node_modules` directory is.
 
 Two consequences, both bad: the diff leaks a local absolute path (an infrastructure identifier), and anyone checking the branch out gets a dangling symlink where their dependencies should be. Seen across three repos simultaneously; all three `.gitignore` files used the trailing-slash form, so all three were exposed.
 
 Rules:
 1. After linking `node_modules` into a worktree, `rm` the symlink before committing, and prefer `git add <explicit paths>` over `git add -A` in a worktree.
-2. Read `git status --short` and `git diff --staged --stat` before every commit in a worktree; treat any unexpected `??` entry, or a `node_modules` row in the stat output, as a stop sign, not noise. An ignore rule that looks like it covers a path may not cover the FORM the path takes.
+2. Run `git diff --staged --stat` before every commit and treat a `node_modules` row as a stop sign. Read `git status --short` too, and treat any unexpected `??` entry as a stop, not noise. This is the general class: an ignore rule that looks like it covers a path may not cover the FORM the path takes.
 3. If you want the link ignored, the pattern must be `node_modules` with no trailing slash, which matches a directory OR a file OR a symlink of that name.
-4. If it is already staged: `git rm --cached node_modules` before committing.
+4. Already staged? `git rm --cached node_modules` before committing.
 
 Generalizes past `node_modules`: any `.gitignore` entry written as `name/` will miss a symlink called `name` (`dist/`, `build/`, `.next/`, `coverage/`, `venv/`). Symlinking a heavy build or dependency directory into a worktree is exactly the workflow that trips it, so this is a standing hazard of the worktree pattern rather than a one-off.
 
-### A framework standalone build inside a worktree nests its output, so the artifacts must never be deployed
+### A Next.js standalone build inside a worktree nests its output, so those artifacts must never be deployed
 
-Some build systems mirror the project directory *relative to the repo root* in their output. Built from the primary checkout the output lands at `.next/standalone/.next/`; built from a worktree it lands at `.next/standalone/<worktree-path>/.next/`. A shared build-script line then fails:
+Next's standalone output mirrors the project directory *relative to the repo root*. Built from the primary checkout it lands at `.next/standalone/.next/`; built from a worktree it lands at `.next/standalone/<worktree-path>/.next/`. A common build script line then fails:
 
 ```
 next build && rm -rf .next/standalone/.next/static && cp -r .next/static .next/standalone/.next/static
@@ -275,11 +275,11 @@ Rules:
 2. Treat that `cp` failure as a hard stop, not a cosmetic warning. It is the signal that the output tree is not the shape the deploy expects.
 3. A worktree build is still the right way to *typecheck and validate* a change. Merge to the default branch, then build from the primary checkout to produce anything deployable.
 
-### `git add` inherits a shared staging area: a pre-commit gate can block YOUR commit over a peer session's content
+### `git add` inherits a shared staging area: a pre-commit secret gate can block YOUR commit over a peer session's content
 
-SYMPTOM: you stage one clean file, and a pre-commit secret scan blocks the commit citing line numbers and identifiers that do not appear anywhere in your file.
+SYMPTOM: you stage one clean file, and the pre-commit secret scan blocks the commit citing line numbers and identifiers that do not appear anywhere in your file.
 
-CAUSE: several sessions share one checkout, so the git INDEX is shared state too. A peer session had already staged 8 other files. Your `git add <one-file>` adds to that existing index, and the gate scans the whole staged diff, not just your path. Observed with 8 peer-staged files carrying real identifier leaks.
+CAUSE: several sessions share one checkout, so the git INDEX is shared state too. A peer session had already staged 8 other files. Your `git add <one-file>` adds to that existing index, and the gate scans the whole staged diff, not just your path. Observed with 8 peer-staged files carrying real repo-name and ssh identifier leaks.
 
 DO NOT: `git commit --no-verify`. The gate was right; the leaks are real. Committing bypasses it for the peer's content, not just yours.
 DO NOT: `git reset` or `git stash`. Reset is fine here in practice but broad, and stash TOUCHES THE WORKING TREE, which can yank files out from under a live peer session mid-write.
@@ -299,33 +299,35 @@ GENERAL RULE: before committing in a shared checkout, always run `git diff --cac
 
 ### Two agents on one browser profile must claim targets in a file before the first fill
 
-Two jobs ran the same form-filling task against the same browser profile at once. Symptoms: tabs appearing that this session did not open, and timeouts waiting for browser responses on roughly every other command.
+Two jobs ran the same form-filling task against the same browser profile at once. Symptoms: tabs appearing that this session did not open, and "Timeout waiting for browser response" on roughly every other command.
 
-Detect it, do not guess: your browser tool's log output prints per-consumer lines with consumer IDs; IDs that are not yours are another agent. Cross-check with `ps` start times against your own PID chain. Other signals that a sibling job is live in your workspace:
+Detect it, do not guess: your browser relay's log command prints per-consumer lines with consumer IDs; IDs that are not yours are another agent. Cross-check with `ps` start times against your own PID chain. Other signals that a sibling job is live in your workspace:
 
 - a file in your scratch dir you did not create (a claims file, an extra output line)
 - a tab listing showing sites unrelated to your task
 - "Another debugger is already attached to the tab with id: N" from debugger-protocol commands
 - your own PID tree not matching the PID recorded in the claims file
 
-Interleaved fill/click on a shared profile silently corrupts the other agent's half-filled form, and duplicate submissions to the same target risk a duplicate record. In one case the second job re-drove an already-claimed target, was rejected by vendor de-duplication ("a record matching these details already exists"), and then misread that rejection as proof its OWN submit had succeeded, writing a false success into its results file.
+Interleaved fill/click on a shared profile silently corrupts the other agent's half-filled form, and duplicate submissions to the same service risk a duplicate record. In one case a sibling job re-drove a claimed target, the vendor rejected it with "a record matching these details already exists", and the sibling misread that rejection as proof its OWN submit had succeeded, writing a false success into its results file.
 
 Rules:
-1. Before the first `fill` on a new target, list your scratch dir and READ any claims or lock file.
+1. Before the first `fill` on a new target, list your scratch dir and READ any claims/lock file.
 2. Append your PID + target to it before driving.
-3. Never treat a vendor "record already exists" response as evidence your own submit worked; it is equally consistent with a sibling having done it. Verify by logging in, or check the claims file.
-4. Target tabs by explicit tab id, and assert the URL before acting; a focus-by-substring command matches any browser tab including ones your relay is not tracking, so a loose URL substring can silently drive the wrong page.
-5. Never assert an outcome for a target another agent drove; you cannot verify it. Say in your final report that the other job's targets are its to report, not yours.
+3. Never treat a vendor "record already exists" response as evidence your own submit worked: it is equally consistent with a sibling having done it. Verify by logging in, or check the claims file.
+4. Target tabs by explicit tab id, and assert the URL before acting; a focus-by-substring matches any tab including ones the relay is not tracking, so a loose URL substring can silently drive the wrong page.
+5. Never assert an outcome for a target another agent drove: you cannot verify it. Say in your final report that the other job's targets are its to report, not yours.
 
 ### Deploying by rsync from the shared checkout can ship a file with conflict markers in it
 
-A static page was built and tested in a worktree, main was fast-forwarded, then `dist/` was rsynced from the SHARED canonical checkout. Seconds later another live session started a merge in that same checkout and rewrote the very files that had just been sent, leaving conflict markers in them. The rsync won the race by about sixty seconds; had it lost, a public page would have gone out containing literal `<<<<<<<` markers. Detection in the wild: the local dist file was 182906 bytes with two build stamps while the committed version was 161069 bytes with one, and `git status` showed `UU` on the same paths.
+A static page was built and tested in a worktree, main was fast-forwarded, then `dist/` was rsynced from the SHARED canonical checkout. Seconds later another live session started a merge in that same checkout and rewrote the very files just sent, leaving conflict markers in them. The rsync won the race by about sixty seconds; had it lost, a public page would have gone out containing literal `<<<<<<<` markers.
 
 Two rules follow.
 
 1. Deploy the artifact you actually verified. rsync from the worktree path you built and ran the tests against, not from the shared checkout, even after a clean fast-forward. The shared checkout is not yours between one command and the next.
 
-2. Check the artifact before it leaves. A generated page that stamps its own build hash gives you a one-line integrity check: grep the stamp and require exactly one match. Two stamps in one file is the signature of a conflicted merge, and it is visible before the upload rather than after. Compare `md5` of the local file against the deployed one afterwards, too: matching the wrong source silently is the failure this catches.
+2. Check the artifact before it leaves. A generated page that stamps its own build hash gives you a one-line integrity check: grep the stamp and require exactly one match. Two stamps in one file is the signature of a conflicted merge, and it is visible before the upload rather than after. Compare md5 of the local file against the deployed one afterwards, too: matching the wrong source silently is the failure this catches.
+
+Detection in the wild: the local file was 182906 bytes with two build stamps while the committed version was 161069 bytes with one, and `git status` showed `UU` on the same paths.
 
 ## Deploy from the merged default branch, not from your worktree
 
@@ -336,7 +338,7 @@ Seen once: a static-page deploy from a worktree overwrote a feature that a concu
 The order that avoids it:
 
 1. merge to the default branch (`git merge --no-ff <branch>`)
-2. **regenerate** generated files there rather than resolving them as text; a conflict in `dist/` is not a conflict, it is a stale artifact
+2. **regenerate** generated files there rather than resolving them as text: a conflict in `dist/` is not a conflict, it is a stale artifact
 3. run the suites against the merged output, not the branch's
 4. deploy, then compare the live build stamp with the one you shipped
 
@@ -346,10 +348,10 @@ A live build stamp you do not recognise, before or after your deploy, means some
 
 The worktree protects you from a stage-everything commit. It does **not** protect you from a shell command that resolves its own path.
 
-Observed: a file was edited correctly in the worktree with an absolute path, then a follow-up `perl -0pi -e 's/.../.../' <relative/path.js>` used a **relative** path. The shell's cwd had reset to the repo root between tool calls, so the substitution rewrote the **shared main checkout**, leaving it referencing a constant that only existed in the worktree. The worktree file was never edited at all.
+Observed: a file was edited correctly in the worktree with an absolute path, then a follow-up `perl -0pi -e 's/.../.../' path/to/file.js` used a **relative** path. The shell's cwd had reset to the repo root between tool calls, so the substitution rewrote the **shared main checkout**, leaving it referencing a constant that only existed in the worktree. The worktree file was never edited at all.
 
 It read as green twice over:
-- `node --check` passed on the contaminated file. It parses syntax and never resolves identifiers, so a file referencing an undefined constant type-checks fine and fails only at runtime.
+- `node --check` passed on the contaminated file. It parses syntax and never resolves identifiers, so a file referencing an undefined constant checks fine and fails only at runtime.
 - The confirming `grep` found the substitution, in the wrong tree.
 
 The failure surfaced much later, as an unrelated-looking `spawn ENOENT` from a test that should have picked up the change.
@@ -361,8 +363,16 @@ Rules:
 
 ### A branch that predates a concurrent session's additions deletes them on merge
 
-Two sessions worked the same set of documents in one shared checkout. The sibling committed two new files straight to the default branch and renamed them into the directory this session owned. This session's feature branch, cut before those files existed, then showed as conflicting. The real hazard was not the conflict: `git diff --stat origin/<default-branch>..HEAD` showed the branch DELETING 625 lines across the sibling's two files, because a merge makes the branch's tree authoritative for paths it never knew about. Rebasing hit an add/add conflict and reset the working copy, losing the edit in progress.
+Two sessions worked the same task in one shared checkout. The sibling committed two new files straight to the default branch and renamed them into the directory this session owned. This session's feature branch, cut before those files existed, then showed CONFLICTING. The real hazard was not the conflict: `git diff --stat origin/main..HEAD` showed the branch DELETING 625 lines across the sibling's two files, because a merge makes the branch's tree authoritative for paths it never knew about. Rebasing hit an add/add conflict and reset the working copy, losing the edit in progress.
 
-What worked: abandon the stale branch, cut a fresh one from current `origin/<default-branch>`, and `git checkout <old-sha> -- <only the files I changed>`. That replays intent without asserting anything about paths a sibling added.
+What worked: abandon the stale branch, cut a fresh one from current `origin/main`, and `git checkout <old-sha> -- <only the files I changed>`. That replays intent without asserting anything about paths a sibling added.
 
-How to apply: before merging any branch older than a few minutes in a repo that other agents write to, run `git diff --stat origin/<default-branch>..HEAD` and read the DELETIONS, not the additions. Deletions of files you never touched mean your branch is stale, not conflicted. Prefer cherry-picking your own changed paths onto a fresh default branch over rebasing, because rebase resolution churns the working tree while sibling agents are still writing to it.
+How to apply: before merging any branch older than a few minutes in a repo that other agents write to, run `git diff --stat origin/main..HEAD` and read the DELETIONS, not the additions. Deletions of files you never touched mean your branch is stale, not conflicted. Prefer cherry-picking your own changed paths onto fresh main over rebasing, because rebase resolution churns the working tree while sibling agents are still writing to it.
+
+### A lock-free concurrent deploy can stop prod and rebuild the shared staging dir mid-build, leaving a partial build live
+
+A deploy lock only serializes sessions that USE it. Two sessions deployed the same app at once; the other session, not holding the lock, ran its promote (stop the prod service, then a partial rsync) while this session's phase A did `rm -rf <staging-dir>` + re-clone + rebuild. Result: prod STOPPED with the standalone server entrypoint MISSING and the public health check returning 503, and no rsync or build was running, because their promote had stalled.
+
+Recovery that WORKS: do NOT roll back to the previous-build backup, which reverts to the pre-collision build and loses the new work. Instead verify the staging dir holds a COMPLETE build of the default branch (server entrypoint present, `git rev-parse` equals the intended commit), then finish the promote from it: rsync staging build + src to prod, patch any absolute-path fields in the generated server config, restart the service, confirm no in-place build is running, health-check, purge the CDN edge cache. Both sessions' staging clones track the default branch, so a complete staging build already carries the integrated work.
+
+Prevention: before `rm -rf`ing a shared staging dir, check the process manager for an online staging service and for a running build or rsync belonging to another session; the lock is necessary but not sufficient when the other party skips it. Always merge to the default branch first (durable) so a prod artifact race cannot lose the code.
