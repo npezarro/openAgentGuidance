@@ -9,7 +9,7 @@ If you spawn a long-running process (`npm run dev`, a background build, a watch 
 
 - **Record the PID or process name** when you start something. You'll need it to stop it later.
 - **Stop it before session end** or document it in `context.md` so the next session knows it's running.
-- **Don't assume a process manager will supervise it.** Only processes declared in the process manager's config (e.g. `ecosystem.config.cjs`) are managed. Anything you start with `node`, `npm run dev`, or `&` is orphaned when your session ends.
+- **Don't assume your process manager will manage it.** Only processes declared in the process manager's config (`ecosystem.config.cjs` or equivalent) are managed. Anything you start with `node`, `npm run dev`, or `&` is orphaned when your session ends.
 
 ```bash
 # Start a dev server, note the PID
@@ -77,7 +77,7 @@ When PM2 restarts a process, the old Node instance may not release its port befo
    process.on('uncaughtException', (err) => { console.error('Uncaught Exception:', err); setTimeout(() => process.exit(1), 100); });
    ```
    - SIGINT handles Ctrl-C in dev, SIGTERM handles PM2 restart. Both are needed.
-   - Close DB (and any other resource) inside the `server.close()` callback, not after it; this ensures SQLite WAL is flushed and connections released before the process exits, preventing SQLITE_BUSY or "database is locked" on the next start.
+   - Close DB (and any other resource) inside the `server.close()` callback, not after it; this ensures SQLite WAL is flushed and connections released before the process exits, preventing SQLITE_BUSY or "database is locked" on the next PM2 start.
    - The force-exit prevents PM2 from hanging on keep-alive connections that never drain.
    - `unhandledRejection`/`uncaughtException` log before exiting; without these, PM2 sees a silent crash with no diagnostic output.
 3. **Use a `start.sh` wrapper for Next.js standalone**: `next start` as the PM2 script loses process tracking. A wrapper lets PM2 signal the actual node process:
@@ -95,7 +95,7 @@ When PM2 restarts a process, the old Node instance may not release its port befo
    ```
    - The build script must use `mkdir -p .next/standalone/.next` before `rm -rf .next/standalone/.next/static`; on a fresh clone the directory doesn't exist and `cp` will fail silently. Correct form: `next build && mkdir -p .next/standalone/.next && rm -rf .next/standalone/.next/static && cp -r .next/static .next/standalone/.next/static`
 
-**Diagnosis:** `pm2 show <process>` with rapidly increasing restart count + `EADDRINUSE` in logs = this pattern.
+**Diagnosis:** `pm2 show <process>` with rapidly increasing restart count plus `EADDRINUSE` in logs = this pattern.
 
 **Belt-and-suspenders: proactive port cleanup in start.sh.** When `kill_timeout` alone isn't enough (e.g. a previous process crashed without releasing the socket), add a `kill_port()` function at the top of `start.sh` that clears the port before launching:
 
@@ -120,7 +120,7 @@ done
 
 Start with SIGTERM (graceful), escalate to SIGKILL only after several retries. Use `fuser` when available (util-linux); fall back to `lsof` (macOS / minimal Linux). This is a start.sh-level fix, not a replacement for ecosystem.config `kill_timeout`.
 
-**App-level retry loop in `server.listen()`.** When the above layers still aren't enough (e.g. the OS hasn't released the socket despite kill_timeout + proactive kill), wrap `app.listen()` in a retry loop instead of exiting immediately:
+**App-level retry loop in `server.listen()`.** When the above layers still aren't enough (e.g. the OS hasn't released the socket despite kill_timeout plus a proactive kill), wrap `app.listen()` in a retry loop instead of exiting immediately:
 
 ```js
 function startServer(retries = 5) {
@@ -144,13 +144,13 @@ const server = startServer();
 
 - Only retry on `EADDRINUSE`; hard-exit on all other errors.
 - 2s delay gives the OS time to release the port between attempts.
-- This is worth adding even when `kill_timeout`, graceful shutdown, and proactive port kill are all already in place; intermittent EADDRINUSE still occurs.
+- Observed in practice: `kill_timeout: 10000` plus graceful shutdown plus proactive port kill were all in place and EADDRINUSE still occurred intermittently. App-level retry eliminated the crash loop.
 
 **Client-side companion: also retry `ECONNREFUSED`.** A worker or client process that starts before its server is fully bound will receive `ECONNREFUSED` instead of `EADDRINUSE`. Include `ECONNREFUSED` in the retryable error set alongside network errors (`EAI_AGAIN`, `ECONNRESET`, `ETIMEDOUT`). This handles the startup-race case where the server and client launch concurrently (e.g. a process manager starts both in rapid succession).
 
 ### PM2 `cron_restart` Does Not Reliably Fire for Batch Jobs
 
-PM2's `cron_restart` + `autorestart: false` only restarts a process that PM2 still considers "stopped" from *its own* tracking; it does not reliably reawaken a batch script that exits normally after doing its work. The script exits, PM2 marks it "stopped", and the cron silently never fires again on some deployments. A batch job can go offline for weeks this way with no error and no alert; it just stops producing output.
+PM2's `cron_restart` plus `autorestart: false` only restarts a process that PM2 still considers "stopped" from *its own* tracking; it does not reliably reawaken a batch script that exits normally after doing its work. The script exits, PM2 marks it "stopped", and the cron silently never fires again on some deployments. A batch poster went offline for 12+ days this way with no error and no alert: it just stopped running.
 
 **Fix:** For any run-once/batch/cron-style PM2 process (digest posters, scrapers, daily scripts), use the system crontab calling `pm2 restart <name> --update-env` as the primary scheduler. Keep `cron_restart` in `ecosystem.config.js` only as documentation, not as the sole mechanism.
 
@@ -172,11 +172,11 @@ docker compose down && docker compose up -d
 - Auth refresh cron jobs that regenerate credential files on the host and expect the container to use them
 - Any post-rotate token handoff from host to containerized service
 
-**Diagnosis:** If a cron-based recovery script keeps looping (restarting the container repeatedly without recovering), but the credential file on the host is valid, this is the likely cause. The container is holding a stale mount.
+**Diagnosis:** If a cron-based recovery script keeps looping (restarting the container repeatedly without recovering) but the credential file on the host is valid, this is the likely cause. The container is holding a stale mount.
 
 ## Docker `exec` Always Needs `--user`
 
-When running `docker exec` against a container that has a non-root application user (e.g. a `node` user), **always pass `--user <username>`** on every exec call. Without it, `docker exec` runs as root: files written inside the container (credentials, config) land in `/root/` instead of `/home/<user>/`, and the application process (running as `node`) cannot read them.
+When running `docker exec` against a container that has a non-root application user (e.g. a container that runs as the `node` user), **always pass `--user <username>`** on every exec call. Without it, `docker exec` runs as root: files written inside the container (credentials, config) land in `/root/` instead of `/home/<user>/`, and the application process (running as `node`) cannot read them.
 
 ```bash
 # WRONG: exec runs as root, credentials written to /root/.claude/
@@ -200,9 +200,9 @@ Five PM2 behaviors that each caused a real silent failure; check all five when a
 
 3. **`shutdown_with_message: true` replaces the signal entirely.** PM2 sends the IPC string message `'shutdown'` and NO signal, then SIGKILLs after `kill_timeout`. If the app doesn't have a `process.on('message', m => m === 'shutdown' && ...)` listener, EVERY restart is a full `kill_timeout` hang ending in SIGKILL, with zero log evidence, because no signal handler ever fires. Ship the ecosystem flag and the listener in the same commit; verify with `time pm2 restart <app>` (graceful = ~1-2s, hang = exactly kill_timeout).
 
-4. **One zombie process entry poisons monitoring for the whole fleet.** A process stuck `online` with `pid: null` (process died outside PM2's view) makes PM2's pidusage batch call throw `TypeError: One of the pids provided is invalid` (a couple of lines every few seconds in `~/.pm2/pm2.log`), which zeroes `monit.memory`/`cpu` for ALL apps, and silently disables every `max_memory_restart`. Diagnosis: `pm2 jlist` and look for `status: online` with no live pid. Fix: stop/delete the zombie, `pm2 save`. This can run undetected for weeks (e.g. an app still registered after its repo was deleted).
+4. **One zombie process entry poisons monitoring for the whole fleet.** A process stuck `online` with `pid: null` (process died outside PM2's view) makes PM2's pidusage batch call throw `TypeError: One of the pids provided is invalid` (a couple of lines every few seconds in `~/.pm2/pm2.log`), which zeroes `monit.memory`/`cpu` for ALL apps, and silently disables every `max_memory_restart`. Diagnosis: `pm2 jlist` and look for `status: online` with no live pid. Fix: stop/delete the zombie, `pm2 save`. This can run undetected for weeks (one case: 44 days, an app whose repo had been deleted while still registered).
 
-5. **`pm2 resurrect` honours saved status; `pm2 restart all` does not.** If a systemd unit runs `ExecStart=pm2 resurrect` followed by `ExecStartPost=pm2 restart all` (a hand-added line, absent from PM2's own generated template), every boot starts EVERY app in the dump, including `cron_restart` one-shots that are meant to sit stopped between runs. The symptom is a daily job that silently runs an extra time on any boot day, doing real work outside its window. Do not blame resurrect: isolate the two commands in a throwaway instance (`PM2_HOME=/tmp/... pm2 start` a dummy, stop it, `pm2 save`, then run each command and read `pm2 jlist`) before concluding. Fix with a second `ExecStartPost` that re-stops anything whose saved status is not `online`, **deriving the set from `dump.pm2` rather than a hardcoded name list**. Parallel hand-maintained lists (`ONDEMAND_STOPPED`, `CRON_TRIGGERED`) are themselves a recurring drift source, and an omission in one can produce false DOWN alerts for months. Such a script must exit 0 on every failure path: a boot that could not re-stop a cron job is far better than a boot marked failed. Install it outside the repo (e.g. `~/bin`) so boot never depends on which branch a shared checkout is parked on. Editing the unit requires `daemon-reload` only, and **never `systemctl restart`**, since `ExecStop=pm2 kill` takes down every service.
+5. **`pm2 resurrect` honours saved status; `pm2 restart all` does not.** If a systemd unit runs `ExecStart=pm2 resurrect` followed by `ExecStartPost=pm2 restart all` (a hand-added line, absent from PM2's own generated template), every boot starts EVERY app in the dump, including `cron_restart` one-shots that are meant to sit stopped between runs. The symptom is a daily job that silently runs an extra time on any boot day, doing real work outside its window. Do not blame resurrect: isolate the two commands in a throwaway instance (`PM2_HOME=/tmp/... pm2 start` a dummy, stop it, `pm2 save`, then run each command and read `pm2 jlist`) before concluding. Fix with a second `ExecStartPost` that re-stops anything whose saved status is not `online`, **deriving the set from `dump.pm2` rather than a hardcoded name list**. Parallel hand-maintained lists (`ONDEMAND_STOPPED`, `CRON_TRIGGERED`) are themselves a recurring drift source, and one such list omitted a cron job that then fired false DOWN alerts for months. Such a script must exit 0 on every failure path: a boot that could not re-stop a cron job is far better than a boot marked failed. Install it outside the repo (e.g. `~/bin`) so boot never depends on which branch a shared checkout is parked on. Editing the unit requires `daemon-reload` only, and **never `systemctl restart`**, since `ExecStop=pm2 kill` takes down every service.
 
 Also: after customizing `out_file`/`error_file`, the default `~/.pm2/logs/<app>-*.log` files stop updating but stay on disk; months later they read as plausible "current" logs and mislead debugging. Delete them when you move log paths, and check mtimes before trusting any log's content.
 
@@ -211,7 +211,7 @@ Also: after customizing `out_file`/`error_file`, the default `~/.pm2/logs/<app>-
 Never give the user long commands, URLs, or multi-line text to copy-paste manually. SSH clients mangle long pastes (newline parsing, line wrapping).
 
 **Instead:**
-- **Long commands (>~80 chars):** Write to a temp script file (e.g. `/tmp/run-me.sh`), then give a short `scp` + `bash` command
+- **Long commands (>~80 chars):** Write to a temp script file (e.g. `/tmp/run-me.sh`), then give a short `scp` plus `bash` command
 - **Long URLs:** Write to a file and `scp`, or use a short redirect
 - **Multi-step commands:** Break into individual short lines, never chain with `&&` for paste
 - **Short commands (<80 chars):** Direct paste is fine
@@ -222,7 +222,7 @@ Never give the user long commands, URLs, or multi-line text to copy-paste manual
 
 When automated processes (hooks, cron jobs, process-manager services) get killed mid-git-operation (by hook timeout, OOM, SIGTERM), they leave `.git/index.lock` files that silently block all subsequent git operations in that repo. No error is surfaced to the caller; git commands simply fail.
 
-**Real-world impact:** A hook timeout left a lock file that blocked a usage-sync job for an entire month. The consuming command reported "no data recorded" with no indication that a stale lock was the cause.
+**Real-world impact:** A hook timeout left a lock file that blocked an automated sync for an entire month. The user-facing command reported "no data recorded" with no indication that a stale lock was the cause.
 
 **Prevention:** Any automated script that runs git commands should check for and remove stale lock files before operating:
 
@@ -245,6 +245,8 @@ fi
 ## Stale Branch Dedup Lists
 
 Automated agents that gate new work on a dedup list built from `git log` or `git branch -r` can block or act on stale data. If a branch's PR merged but the branch wasn't deleted, it still shows as open in `git branch -r`. The local git log window can also miss merges from before its lookback horizon.
+
+**Real-world impact:** Two consecutive automated runs each found 2 already-merged branches listed as open in their dedup context. The dedup script used git log and branch listings; both showed the branches as active, but the PRs had already merged.
 
 **Pattern:** Before acting on any branch in a dedup-gated list, reconcile against actual PR state:
 
@@ -299,7 +301,7 @@ def send_completion_email(to_email: str, subject: str, body: str) -> None:
         log.warning(f"Skipping email: invalid address: {to_email!r}")
         return
 
-    with smtplib.SMTP("smtp.example.com", 587) as server:
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.starttls()
         # ... rest of send
 ```
@@ -330,13 +332,13 @@ Always run `pm2 save` after `pm2 startOrRestart` to persist the updated config f
 
 **Extended gotcha: dynamically-loaded env keys drop on name-restart.** If the ecosystem config loads env vars via a function (e.g. a `loadDotenv('.env')` call that spreads keys into the `env` block), those keys only exist in the running process when PM2 re-evaluates the config file (`pm2 startOrRestart ecosystem.config.cjs`). A plain `pm2 restart <name>` reuses the cached env and never re-runs the loader, so the keys silently vanish. Symptom: a service degrades to fallback behavior (wrong URL, missing API key, a free fallback provider instead of the paid one) without crashing, and `/health` stays green. Fix: **load `.env` inside the application itself** (e.g. `import 'dotenv/config'` as the first import in `index.js`) rather than in the ecosystem config; that way any restart method keeps the keys.
 
-**Sharper variant: PM2's own `env_file` field can drop keys even on a full `delete && start`.** The trap above is about *restart* not re-reading the config; this one bites even the "correct" fix. An ecosystem config using PM2's native `env_file: "/path/to/.env"` key (not a custom loader) can still come up with no env vars in `process.env` after a `pm2 delete` + `pm2 start ecosystem.config.js` (a full process recreate, which does re-read the config), throwing auth-secret and database-URL errors on the live site. `env_file` is not reliable enough to depend on at all, on any restart path. Fix: don't use `env_file`; add `--env-file=<path>` to `node_args` instead (`node_args: "--env-file=/path/to/.env --max-old-space-size=1024"`). Node loads that file straight into its own `process.env` before the app runs, independent of how PM2 (re)started it.
+**Sharper variant: PM2's own `env_file` field can drop keys even on a full `delete && start`.** The trap above is about *restart* not re-reading the config; this one bites even the "correct" fix. An ecosystem config used PM2's native `env_file: "/path/to/.env"` key (not a custom loader), and a `pm2 delete` plus `pm2 start ecosystem.config.js` (a full process recreate, which does re-read the config) still came up with no `AUTH_SECRET`/`DATABASE_URL` in `process.env`, throwing auth `MissingSecret` and ORM `Invalid URL` 500s on the live site. `env_file` is not reliable enough to depend on at all, on any restart path. Fix: don't use `env_file`; add `--env-file=<path>` to `node_args` instead (`node_args: "--env-file=/path/to/.env --max-old-space-size=1024"`); Node loads that file straight into its own `process.env` before the app runs, independent of how PM2 (re)started it.
 
 ## PM2 Crash Loops from DB Dependency on Startup
 
 Services that connect to Postgres (or any external DB) at module load time can enter a tight PM2 restart loop if the DB isn't ready on first boot or after a VM reboot. Two-layer fix:
 
-**Layer 1: PM2 exponential backoff.** Add `exp_backoff_restart_delay: 100` to the ecosystem config. PM2 doubles the restart delay on each consecutive failure (100ms -> 200ms -> 400ms...) instead of hammering the process in a tight loop.
+**Layer 1: PM2 exponential backoff.** Add `exp_backoff_restart_delay: 100` to the ecosystem config. PM2 doubles the restart delay on each consecutive failure (100ms, 200ms, 400ms, ...) instead of hammering the process in a tight loop.
 
 ```js
 module.exports = {
@@ -349,7 +351,7 @@ module.exports = {
 };
 ```
 
-**Layer 2: Application-level connection retry.** For Prisma, add startup retry in `src/lib/db.ts` so the process doesn't crash before the DB becomes available:
+**Layer 2: application-level connection retry.** For Prisma, add startup retry in `src/lib/db.ts` so the process doesn't crash before the DB becomes available:
 
 ```ts
 if (process.env.NODE_ENV === "production") {
@@ -369,18 +371,18 @@ if (process.env.NODE_ENV === "production") {
 }
 ```
 
-**When to apply:** Any Next.js + Prisma service on PM2. Especially important after VM reboots; Postgres may take a few seconds to accept connections, causing the first startup attempt to fail. The two layers are complementary: app-level retry handles transient blips; PM2 backoff prevents hammering when the DB is down for longer.
+**When to apply:** Any Next.js plus Prisma service on PM2. Especially important after VM reboots; Postgres may take a few seconds to accept connections, causing the first startup attempt to fail. The two layers are complementary: app-level retry handles transient blips; PM2 backoff prevents hammering when the DB is down for longer.
 
 ## Bash `date +%H` Produces Octal-Invalid Strings in Arithmetic
 
-`date +%H` emits zero-padded hours (`08`, `09`). Bash `(( ))` arithmetic interprets numbers starting with `0` as octal, so `08` and `09` are invalid octal, causing arithmetic to fail with `value too great for base` at those hours only.
+`date +%H` emits zero-padded hours (`08`, `09`). Bash `(( ))` arithmetic interprets numbers starting with `0` as octal; `08` and `09` are invalid octal, causing arithmetic to fail with `value too great for base` at those hours only.
 
 ```bash
 # BAD: fails silently (or aborts with set -e) at hours 08 and 09
 current_hour=$(date +%H)          # "08"
 (( current_hour >= 8 )) && ...    # bash: 08: value too great for base
 
-# GOOD: no zero-pad (Linux only, GNU date)
+# GOOD: no zero-pad (GNU date)
 current_hour=$(date +%-H)         # "8"
 (( current_hour >= 8 )) && ...    # works
 
@@ -390,9 +392,9 @@ current_hour=$(printf '%d' $(date +%H))
 
 This is especially insidious because it only fails at hours `08` and `09`; cron scripts appear to work on all other hours, making the bug hard to reproduce.
 
-## `WebFetch` Routes Through a Server-Side Edge Fetcher, Not the Agent's Local Network
+## `WebFetch` Routes Through the Model Provider's Edge, Not the Agent's Local Network
 
-Claude Code's `WebFetch` tool sends requests through a server-side fetcher; it does **NOT** use the agent's local network namespace. Fetches to `localhost`, `host.docker.internal`, RFC 1918 addresses, or SSH-tunneled services fail silently: the fetcher resolves the hostname against the public internet, gets nothing, and returns empty or wrong output. The agent has no signal that the fetch went to the wrong place.
+The agent harness's `WebFetch` tool sends requests through a server-side edge fetcher; it does **NOT** use the agent's local network namespace. Fetches to `localhost`, `host.docker.internal`, RFC 1918 addresses, or SSH-tunneled services fail silently: the remote fetcher resolves the hostname against the public internet, gets nothing, and returns empty or wrong output. The agent has no signal that the fetch went to the wrong place.
 
 **Affected URLs:**
 - `http://localhost:N/...`
@@ -404,17 +406,17 @@ Claude Code's `WebFetch` tool sends requests through a server-side fetcher; it d
 
 **Never design system-prompt fallbacks that call `WebFetch http://host.docker.internal:...`**; the fallback silently does nothing, and there's no error to surface the failure.
 
-## Generated Crontab Reconciliation
+## Cron Registry Reconciliation (generated crontabs)
 
-When the live crontab is GENERATED from a registry file, and the generator's `--install` refuses because the live crontab has entries the registry doesn't know about, that refusal is protecting you. Never reach for `--install --force`, which silently DELETES every live-but-unregistered job (this can kill load-bearing jobs added out-of-band).
+If your crontab is GENERATED from a registry file (e.g. `registry.json` plus a `generate-crontab.sh --install`), then when `--install` refuses because the live crontab has entries the registry doesn't know about, that refusal is protecting you. Never reach for `--install --force`, which silently DELETES every live-but-unregistered job (in one case, forcing would have killed load-bearing token-relay crons).
 
 Procedure:
 1. Diff both directions: `diff <(crontab -l | grep -vE '^\s*(#|$)' | sort) <(./generate-crontab.sh | grep -vE '^\s*(#|$)' | sort)`.
-2. For each drifted job, find the documented intent before deciding direction. Drift is bidirectional: live-added jobs (new infra) AND deliberately-paused jobs (`#PAUSED-*` comments) both accumulate; the live crontab usually reflects the newest decisions.
-3. Import live-only jobs into the registry as `enabled: true`; mark deliberately-paused registry jobs `enabled: false` with a `note` saying why and where that's documented.
-4. Run `--install` (it should write a timestamped backup first), then verify the delta:
+2. For each drifted job, find the documented intent (notes, guidance, closeouts) before deciding direction. Drift is bidirectional: live-added jobs (new infra) AND deliberately-paused jobs (`#PAUSED-*` comments) both accumulate; the live crontab usually reflects the newest decisions.
+3. Import live-only jobs into the registry as `enabled: true`; mark deliberately-paused registry jobs `enabled: false` with a `note` saying why plus where that's documented.
+4. `--install` (it writes a timestamped backup first), then verify the delta:
    `diff <(grep -vE '^\s*(#|$)' backups/<latest>) <(crontab -l | grep -vE '^\s*(#|$)')`
-   must show exactly the changes you intended: nothing else activated or dropped.
+   must show exactly the changes you intended, nothing else activated or dropped.
 5. When pausing or adding a job in future, do it in the registry, not the crontab; hand-edits are the source of this drift.
 
 ## Bash `set -e` Kills Error Handlers Before They Fire
@@ -438,7 +440,7 @@ if [ "$EXIT_CODE" -ne 0 ]; then
 fi
 ```
 
-**Why it matters:** Runner scripts with this bug have had their timeout logs, failure alerts, and state-file writes all be dead code, so failure notifications silently never fired for months.
+**Why:** A set of automated runners plus a verify script had this bug: timeout logs, failure alerts, and state-file writes were all dead code because `set -e` aborted before the inline `EXIT_CODE=$?` capture. All failure notifications silently never fired for months.
 
 **How to apply:** In any `set -e` or `set -euo pipefail` script, capture exit codes inline with `cmd || VAR=$?`. Never write `cmd; VAR=$?`; the semicolon is still `set -e`-transparent and exits on failure.
 
@@ -459,6 +461,8 @@ if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
 fi
 trap '[ "$STASHED" = true ] && git stash pop --quiet 2>/dev/null || true' EXIT
 ```
+
+**Why:** A verify script had an unconditional `git stash pop` in its `trap cleanup EXIT`. Any user with staged work could have it silently overwritten when the verify script ran.
 
 ## PM2 Periodic-Exit Scripts Must Use `autorestart: false` with `cron_restart`
 
@@ -494,7 +498,7 @@ Also check: PM2 health allowlists, since `autorestart: false` processes appear i
 
 ## Cron Wrappers on Remote Machines: Self-Sync via `git pull --ff-only`
 
-Cron scripts running on isolated machines (a second PC, a Raspberry Pi, or any host without an automatic deploy pipeline) should `git pull --ff-only` at the start of each run. Without this, code/config fixes pushed to the remote don't reach the machine until someone manually SSHs in, meaning a fix shipped during the day won't make the overnight scheduled run.
+Cron scripts running on isolated machines (a second PC, a small single-board computer, or any host without an automatic deploy pipeline) should `git pull --ff-only` at the start of each run. Without this, code/config fixes pushed to the remote don't reach the machine until someone manually SSHs in, meaning a fix shipped during the day won't make the overnight scheduled run.
 
 ```bash
 # At the top of the cron wrapper, before activating venv / installing deps
@@ -507,7 +511,7 @@ git pull --ff-only 2>&1 | grep -v "^Already up to date" || true
 - `grep -v "Already up to date"` keeps the log clean on no-op pulls.
 - Place this BEFORE `source .venv/bin/activate` or `npm install` so updated dependency specs are also picked up.
 
-**Machines this applies to:** any host that runs scheduled jobs but doesn't receive automatic deploys (git hooks, process-manager reload, CI/CD). Hosts with deploy pipelines don't need this; isolated machines do.
+**Machines this applies to:** any host that runs scheduled jobs but doesn't receive automatic deploys (git hooks, PM2 reload, CI/CD). Hosts with deploy pipelines don't need this; isolated machines do.
 
 ## `claude -p` vs `claude --print`: Positional Argument Trap
 
@@ -525,9 +529,9 @@ echo "my prompt" | claude --print --model sonnet
 
 **Rule:** In any script or cron job that pipes stdin to `claude`, use `--print` (not `-p`) whenever other flags follow. Reserve `-p` for single-argument invocations like `claude -p "inline prompt"` (no piped stdin).
 
-## Retrying Transient ConnectionError / Timeout on External APIs (Python)
+### Retrying Transient ConnectionError / Timeout on External APIs (Python)
 
-Some hosts (notably WSL2) suffer intermittent DNS blips, especially during overnight cron windows, causing `requests.exceptions.ConnectionError` (`NameResolutionError`) on calls to external APIs. One blip drops the entire poll cycle and generates noisy ERROR logs.
+Some environments (notably WSL2) suffer intermittent DNS blips, especially during overnight cron windows, causing `requests.exceptions.ConnectionError` (`NameResolutionError`) on calls to external APIs. One blip drops the entire poll cycle and generates noisy ERROR logs.
 
 **Correct pattern**: wrap the call in a manual retry loop:
 
@@ -548,9 +552,9 @@ def _api_get(url, params=None, _retries=2):
 
 **Why not `urllib3.Retry`?** Its `retry_on_connection_error=True` parameter can crash the process on import. The manual loop is the safe cross-platform approach.
 
-**When to apply:** any Python service polling an external API from WSL2 or a cron context. Wrap the raw `requests.get()` in a helper like `_api_get()` and route all calls through it.
+**When to apply:** any Python service polling an external API from a flaky-DNS or cron context. Wrap the raw `requests.get()` in a helper like `_api_get()` and route all calls through it.
 
-## SSH Tunnel Bridge: Use 127.0.0.1 and Retry Transient Errors
+### SSH Tunnel Bridge: Use 127.0.0.1 and Retry Transient Errors
 
 When an app connects to a local service via an SSH reverse tunnel, two patterns prevent tunnel flap from causing permanent job failures:
 
@@ -578,14 +582,14 @@ function isTransientError(err: any): boolean {
     msg.includes("socket hang up")
   );
 }
-// 3 attempts, 5s between retries: only for isTransientError(err)
+// 3 attempts, 5 s between retries: only for isTransientError(err)
 ```
 
-Do NOT retry non-transient errors (400/401/403, 503 "slots busy", 429 rate-limit); those must fail immediately.
+Do NOT retry non-transient errors (400/401/403/503 "slots busy", 429 rate-limit); those must fail immediately.
 
-**Applies broadly:** The `isTransientError` check is the key primitive; apply the same retry guard to any internal HTTP service call that routes through a local broker or tunnel.
+**Applies broadly:** The `isTransientError` check is the key primitive. Apply the same retry guard to any internal HTTP service call that routes through a local broker or tunnel.
 
-## Node.js `http.request` Retry: Include DNS Errors (`ENOTFOUND`, `EAI_AGAIN`)
+### Node.js `http.request` Retry: Include DNS Errors (`ENOTFOUND`, `EAI_AGAIN`)
 
 DNS resolution failures are transient: a temporary nameserver blip produces `ENOTFOUND` or `EAI_AGAIN`, then resolves on the next attempt. When building an `on('error')` retry handler for `http.request`, include both DNS error codes alongside the usual connection errors:
 
@@ -645,7 +649,7 @@ while (true) {
 
 **Batch sizing:** Keep batches small enough that peak per-batch memory stays under ~50-100 MB. 1000 rows/batch is a reasonable default; very wide rows (BLOBs, large text columns) need smaller batches.
 
-## Resilient DB JSON Parsing: Wrap Every `JSON.parse()` in try/catch
+### Resilient DB JSON Parsing: Wrap Every `JSON.parse()` in try/catch
 
 When reading rows that store serialized JSON (metadata columns, config blobs, event payloads), wrap every `JSON.parse()` call in a `try/catch`. A single corrupt or malformed row should log a warning and be skipped or return a safe default; it must NOT throw uncaught and return a 500 for the entire endpoint/query.
 
@@ -671,9 +675,9 @@ return rows.flatMap(r => {
 
 An agent that creates a PR, ticket, or any artifact meant to be picked up later is not done when the artifact exists; it's done when the artifact reaches its intended end state (merged, closed, actioned). "I created X" and "X was consumed" are different claims; only report the one you actually verified.
 
-**Recurring pattern:** an automated runner creates one feature PR per run, but its own closeout never re-checks whether *prior* runs' PRs actually got merged. A separate janitor job has caught this independently many times, each time finding fully-verified, CI-green PRs sitting stale for days because nothing after the creating session confirmed the merge landed.
+**Recurring pattern:** An autonomous runner creates one feature PR per run, but its own closeout never re-checks whether *prior* runs' PRs actually got merged. A separate janitor cron caught this independently at least five times, each time finding 1-4 fully-verified, CI-green PRs sitting stale for 2-6 days because nothing after the creating session confirmed the merge landed. One run alone found four separate repos' PRs stale simultaneously.
 
-**Why this kind of thing recurs without getting fixed:** the pattern gets logged repeatedly as a one-off "Learning" note but never promoted to a durable guidance file or a code change, so each occurrence is treated as an isolated incident instead of a signal that the general behavior (fire-and-forget artifact creation) needs a structural fix.
+**Why this kept recurring without getting fixed:** the pattern was logged in a failures log three times as a "Learning" section but never promoted to a durable guidance file or a code change; each occurrence was treated as a one-off instead of a signal that the general behavior (fire-and-forget artifact creation) needed a structural fix.
 
 **How to apply:** any runner that creates a PR/ticket/artifact for later pickup should, at the START of its next run (not just when a downstream janitor happens to notice), reconcile its own prior outputs against live state (`gh pr view <n> --json state` for every PR link in its own recent log) before creating new work. If a runner can't easily do that itself, a downstream sweep is a valid backstop, but log the sweep's cadence explicitly so staleness has a bounded worst case instead of "whenever the janitor gets to it."
 
@@ -685,28 +689,26 @@ An agent that creates a PR, ticket, or any artifact meant to be picked up later 
 4. **Git state:** No uncommitted changes related to your task
 5. **Context:** `context.md` reflects what's running and what's not
 
-## Host Snippets Instead of Pasting Them
+### Host the snippet, don't paste it
 
-When a snippet (heredoc, `echo >> file`, multi-line bash, anything with mixed quotes/backticks/escapes) is being pasted into a remote shell and gets mangled (smart quotes, lost newlines, "syntax error near unexpected token `newline`", "Permission denied" on `>>`), stop re-trying the paste. Host the artifact somewhere fetchable and hand the user a single short `curl` one-liner instead:
+When a snippet (heredoc, `echo >> file`, multi-line bash, anything with mixed quotes/backticks/escapes) is being pasted into a remote shell and gets mangled (smart-quotes, lost newlines, "syntax error near unexpected token `newline`", "Permission denied" on `>>`), stop re-trying the paste.
 
-```bash
-curl -sS https://<your-host>/<slug> >> ~/.ssh/authorized_keys && echo OK
-```
+Why: terminal paste corruption is structural, not user error. Multiple sessions have burned cycles re-typing or working around broken pastes. The fix is to host the artifact and `curl` it.
 
-Refuse to host content matching private-key / `api_key` / password / `client_secret` patterns.
+How to apply: write the content to a file served over HTTP (any static host you control), then hand the user a one-liner like `curl -sS https://<your-host>/<slug> >> ~/.ssh/authorized_keys && echo OK`. Refuse to host content matching private-key / `api_key` / `password` / `client_secret` patterns.
 
-## Gemini CLI `-p` Does NOT Support Multimodal (Video/Image) Input
+### Gemini CLI `-p` does NOT support multimodal (video/image) input
 
 `gemini -p` (headless CLI mode with `GOOGLE_GENAI_USE_GCA=true`) treats `@filepath` references as **text only**. Binary attachments (mp4, jpg, png, etc.) are not passed as multimodal Parts; Gemini responds with "I cannot view image/video files." This is true even with `--skip-trust` and even though the Gemini API itself supports native video/image input.
 
 **Do not plan VLM (vision/video) tasks to route through `gemini -p`.** The CLI silently fails without a clear error at the planning stage.
 
 **Alternatives:**
-- For local image understanding: `claude -p --model haiku` natively reads images via the Read tool.
-- For native video: use the Gemini Files API directly (Node SDK or REST) with a `GEMINI_API_KEY`.
+- For free local image understanding: `claude -p --model haiku` natively reads images via the Read tool.
+- For paid native video: use the Gemini Files API directly (Node SDK or REST) with an API key from AI Studio.
 - For text-only Gemini work: `gemini -p` works fine.
 
-## Chokidar File-Watcher: Denylist Segment vs. Substring Matching
+### Chokidar file-watcher: denylist segment vs. substring matching
 
 Chokidar's `ignored` function receives the **full file path**. Two types of denylist entries need different matching logic:
 
@@ -725,11 +727,11 @@ const ignored = (filePath) => {
 
 Also always extend the default denylist to include heavy/noisy directories (`.local`, `.rustup`, `.cache`, `node_modules`) and the service's own state/DB paths. Set `kill_timeout` high enough (>=5000ms) for chokidar to close cleanly on PM2 restart; the default 1.6s may cause EADDRINUSE loops.
 
-## Bash `$HOSTNAME` Is Always Set: Never Use `${HOSTNAME:-default}` as a Bind-Address Guard
+### Bash `$HOSTNAME` is always set: never use `${HOSTNAME:-default}` as a bind-address guard
 
-Bash **auto-populates `$HOSTNAME`** with the system hostname. The `${HOSTNAME:-default}` substitution **never falls back**, because `$HOSTNAME` is always non-empty.
+Bash **auto-populates `$HOSTNAME`** with the system hostname. The `${HOSTNAME:-default}` substitution **never falls back** because `$HOSTNAME` is always non-empty.
 
-**Why this matters for Node.js servers:** Next.js standalone, Vite preview, and several other Node servers read `process.env.HOSTNAME` to decide their bind address. If `$HOSTNAME` is the machine's external hostname, the server binds to that IP instead of loopback, and a reverse proxy's `localhost` upstream gets connection-refused (public URL returns 503 with no useful error in app logs; the server says "Ready in 0ms").
+**Why this matters for Node.js servers:** Next.js standalone, Vite preview, and several other Node servers read `process.env.HOSTNAME` to decide their bind address. If `$HOSTNAME` is the host's external hostname, the server binds to the external IP instead of loopback, and a reverse proxy's `localhost` connection gets refused (public URL returns 503 with no useful error in app logs; the server says "Ready in 0ms").
 
 **Fix:** Force-set the bind address explicitly:
 ```bash
@@ -742,7 +744,7 @@ Other bash builtins similarly always populated (must not be used as `:-` default
 
 **Diagnostic:** If a Node service logs "listening" but the proxy or curl-from-localhost gets connection-refused, run `ss -ltnp | grep <port>` and check the bind address before assuming the proxy is broken.
 
-## SQLite `.iterate()` Cleanup and File-Watcher Depth Limiting
+### SQLite `.iterate()` Cleanup and File-Watcher Depth Limiting
 
 **SQLite iterator cleanup:** Always wrap `.iterate()` in try/finally to ensure the cursor is closed even on error. An unclosed iterator holds a read transaction open, preventing WAL checkpoints and causing memory growth under high load:
 
@@ -763,9 +765,9 @@ Also tune `PRAGMA cache_size` to cap SQLite's memory footprint (`PRAGMA cache_si
 chokidar.watch(paths, { depth: 2, usePolling: false })
 ```
 
-`depth: 2` is usually sufficient for project file-watching. Combine with the denylist segment/substring pattern (above) to prevent feedback loops. Note: use `?? 2` rather than `|| 2` for the depth fallback, since `0` is a valid depth.
+`depth: 2` is usually sufficient for project file-watching. Combine with the denylist segment/substring pattern (see above) to prevent feedback loops. Use `?? 2` rather than `|| 2` for the depth fallback, since `0` is a valid depth.
 
-## Background Queue Saturation Guards for Webhook Handlers
+### Background Queue Saturation Guards for Webhook Handlers
 
 When a route handler spawns fire-and-forget background work (webhook processors, job dispatchers), track pending task count and return HTTP 503 when a cap is exceeded. Without this guard, burst traffic creates unbounded task queues that OOM the process:
 
@@ -786,7 +788,7 @@ app.post('/webhook', (req, res) => {
 
 Always decrement with `.finally()`, not `.then()` alone; rejected promises skip `.then()` and the count never decrements.
 
-## SQLite `createMany` Variable Limit and Webhook Timestamp Validation
+### SQLite `createMany` Variable Limit and Webhook Timestamp Validation
 
 **SQLite `createMany` variable limit:** SQLite limits bind parameters per statement (~999 for older builds, up to 32766 in recent ones). Prisma's `createMany` maps each field of each record to a bind variable; for large arrays this can silently fail or throw. Chunk `createMany` calls for tables with more than a handful of fields:
 
@@ -797,7 +799,7 @@ for (let i = 0; i < records.length; i += CHUNK_SIZE) {
 }
 ```
 
-**Timestamp Date validation before Prisma insert:** Converting webhook numeric timestamps with `new Date(Number(raw.ts) * 1000)` produces `Invalid Date` when the value is non-numeric, null, or NaN. Prisma/LibSQL crashes on `Invalid Date` being inserted into a DateTime column. Always validate after construction:
+**Timestamp Date validation before insert:** Converting webhook numeric timestamps with `new Date(Number(raw.ts) * 1000)` produces `Invalid Date` when the value is non-numeric, null, or NaN. Prisma/LibSQL crashes on `Invalid Date` being inserted into a DateTime column. Always validate after construction:
 
 ```js
 let startTime = new Date(Number(raw.startTimeInSeconds) * 1000);
@@ -806,7 +808,7 @@ if (Number.isNaN(startTime.getTime())) {
 }
 ```
 
-## PrismaClient Global Singleton in Next.js
+### PrismaClient Global Singleton in Next.js
 
 Next.js can re-evaluate modules multiple times: during development hot reload and in production when bundler chunks each re-evaluate their imports. Each re-evaluation creates a new `PrismaClient` instance, exhausting DB connection pools and causing `Too many connections` or `Connection timeout` errors.
 
@@ -828,11 +830,11 @@ global.__prisma = prisma;
 
 This is the canonical pattern. `global.__prisma` persists across module re-evaluations; the `??` means only one instance is ever created per process lifetime.
 
-**Pair with startup connection retry in production** (same `connectWithRetry` helper shown above under PM2 crash loops).
+**Pair with startup connection retry in production** (the `connectWithRetry` helper shown earlier).
 
 **Apply to:** any Next.js app that imports PrismaClient in `src/lib/db.ts` (or equivalent). If you see `warn(prisma-client) There are already 10 instances of Prisma Client actively running` in logs, the singleton is missing.
 
-## `PrismaLibSql` Takes a Config Object, NOT a `@libsql/client` Instance
+### `PrismaLibSql` Takes a Config Object, NOT a `@libsql/client` Instance
 
 `PrismaLibSql` from `@prisma/adapter-libsql` expects a **Config object** `{ url, authToken? }`; it does NOT accept a pre-constructed `@libsql/client` instance.
 
@@ -847,7 +849,7 @@ const client = createClient({ url, authToken });
 const adapter = new PrismaLibSql(client);  // wrong constructor signature
 ```
 
-**Why this trips AI agents:** The `@libsql/client` package and `@prisma/adapter-libsql` are often imported together in docs and examples, making the instance-passing form look natural. The error from passing an instance is not always obvious; it may manifest as a connection failure or unexpected adapter state rather than a type error.
+**Why this trips AI agents:** The `@libsql/client` package and `@prisma/adapter-libsql` are often imported together in docs and examples, making the instance-passing form look natural. The error message from passing an instance is not always obvious; it may manifest as a connection failure or unexpected adapter state rather than a type error.
 
 ## Express API Routes: Null-Check After DB Insert and Full try-catch Audit
 
@@ -887,7 +889,7 @@ router.get('/threads/:threadId/messages', requireAuth, (req, res) => {
 
 **The cascade trigger:** once a single missing null-check or missing try-catch is found, audit ALL routes in the file; the pattern is always systemic (every route was written with the same unchecked assumptions). A partial fix leaves silent 500s in remaining routes.
 
-## Nullable Column Guard: `!== undefined` Instead of `||`
+### Nullable Column Guard: `!== undefined` Instead of `||`
 
 When a DB column can legitimately be stored as `null` (e.g. "no target linked"), using `|| default` silently clobbers stored nulls:
 
@@ -905,13 +907,13 @@ const targetId = (settings && settings.target_instance_id) !== undefined
 
 ## Claude CLI `--model` Alias vs. SDK Model ID
 
-The Claude CLI's `--model` flag takes **short aliases**, not full API model IDs:
+The Claude CLI's `--model` flag takes **short aliases**, not API model IDs:
 
 | CLI alias (correct) | API model ID (wrong for CLI) |
 |---|---|
-| `sonnet` | `claude-sonnet-<version>` |
-| `opus` | `claude-opus-<version>` |
-| `haiku` | `claude-haiku-<version>` |
+| `sonnet` | a full version-suffixed model id |
+| `opus` | a full version-suffixed model id |
+| `haiku` | a full version-suffixed model id |
 
 Using the API ID string causes the CLI call to fail or be silently ignored:
 
@@ -919,8 +921,8 @@ Using the API ID string causes the CLI call to fail or be silently ignored:
 # CORRECT
 claude --print --model sonnet "your prompt"
 
-# WRONG: a versioned API model ID is not a CLI alias
-claude --print --model claude-sonnet-<version> "your prompt"
+# WRONG: a full API model ID is an SDK identifier, not a CLI alias
+claude --print --model claude-sonnet-x-y "your prompt"
 ```
 
 **Why agents get this wrong:** SDK docs use full API model IDs. When an agent generates shell commands invoking `claude`, it copies the API ID format instead of the CLI short-form alias.
@@ -956,42 +958,35 @@ if (staleProviders.length > 0) {
 
 **Key rules:**
 - Run all provider checks via `Promise.all` (parallel, not serial)
-- Return **503**, not 200 with a warning body; health checks and load balancers need the status code
+- Return **503**, not 200 with a warning body; process-manager health checks and load balancers need the status code
 - Include provider names in the response for rapid diagnosis
-- Threshold = ~1.5× expected sync interval (e.g. 36h for a 24h cron)
+- Threshold = ~1.5x expected sync interval (e.g. 36h for a 24h cron)
 - `lastSyncedAt IS NULL` is stale; treat it as "never synced"
 
-## V8 Object Nullification in Batch Processing Functions
+### V8 Object Nullification in Batch Processing Functions
 
-V8 does not always garbage-collect large objects that remain in scope until a function returns, even when those objects are no longer accessed. In batch-processing functions that build large aggregation maps (counts by key, duration histograms, parsed rows), explicitly set those objects to `null` after use to reduce peak RSS:
+V8 does not always garbage-collect large objects that remain in scope until a function returns, even when those objects are no longer accessed. In batch-processing functions that build large aggregation maps (counts by key, duration histograms, parsed rows), explicitly setting those objects to `null` after use can reduce peak RSS:
 
 ```js
 export function buildSummaryFromIterator(sinceId, limit) {
   let appDurations = {};   // use `let`, not `const`
   let fileCounts = {};
-  let shellCommands = [];
 
-  for (let evt of iterateEventsSinceId(sinceId, limit)) {
+  for (const evt of iterateEventsSinceId(sinceId, limit)) {
     // ... process evt ...
-    evt = null;  // free each row object before the next arrives
   }
 
-  const summary = buildMarkdown(appDurations, fileCounts, shellCommands);
+  const summary = buildMarkdown(appDurations, fileCounts);
 
   // Explicitly clear large accumulators before return
   appDurations = null;
   fileCounts = null;
-  shellCommands = null;
 
   return { summary };
 }
 ```
 
-**Two nullification sites:**
-1. **Loop-body:** set `evt = null` after processing each row so the row object can be reclaimed before the next row is fetched.
-2. **Post-accumulation:** set aggregation maps to `null` before `return`. V8 may keep them alive until the caller's frame unwinds; explicit null breaks that hold.
-
-**When to apply:** any function that processes thousands of rows or builds large hash maps, and where the process is memory-constrained (PM2 `max_memory_restart`, containerized Node.js, etc.). Requires `let` declarations, not `const`; see the `for…of` const gotcha below, which is the failure mode when this is applied carelessly.
+**Critical caveat:** this only works on `let` declarations. Assigning `null` to a `const` throws `TypeError: Assignment to constant variable` and crashes the function (see the `for…of` section below, which is the more common form of this mistake). Do not apply this to `const`-declared accumulators or to `for…of` loop variables. For ordinary function-scope variables, the GC reclaims them when the call frame exits anyway; reserve the explicit nulling for memory-constrained processes handling thousands of rows.
 
 ## File-Watcher Feedback Loop: Exclude Files the Service Writes To
 
@@ -1017,7 +1012,7 @@ const watcher = chokidar.watch(dirs, {
 });
 ```
 
-**Why substring match, not exact path:** SQLite writes three files simultaneously (`activity.db`, `activity.db-wal`, `activity.db-shm`). A substring check on the base name catches all three without enumerating each suffix.
+**Why substring match, not exact path:** SQLite writes three files simultaneously (`x.db`, `x.db-wal`, `x.db-shm`). A substring check on the base name catches all three without enumerating each suffix.
 
 **When to apply:** Any time a new watcher-based collector or processor is added to a service that already has a database or log file inside the watched tree. Audit the `ignored` function first; the exclusion is easy to miss when the feature is "just add a new watched directory."
 
@@ -1114,9 +1109,9 @@ export function runSummarization(config) {
 }
 ```
 
-Net effect: no output file is ever written again; the error repeats every tick until the corrupt row ages out of retention (which can be weeks).
+Net effect: no output file is ever written again; the error repeats every tick until the corrupt row ages out of retention (potentially weeks, for a 30-day window).
 
-**Fix: defensive parse helper:**
+**Fix: defensive parse helper.**
 ```js
 function parseMetadata(evt) {
   try {
@@ -1137,28 +1132,7 @@ function parseMetadata(evt) {
 
 One corrupt row in a DB column can arrive from a crashed writer, a schema migration edge case, or a race. Always guard.
 
-**Companion failure mode, list endpoint 500:** The same bare-parse risk applies to consumer GET routes (list/all/feed endpoints) that call `JSON.parse` inside a `.map()` callback on stored blob columns. One corrupt row throws a `SyntaxError` that propagates out of `.map()` and 500s the **entire response**; all healthy sibling rows are lost and the consumer feed goes dark. Degrading the bad row to a fallback while returning healthy siblings is always the better failure mode.
-
-Fix: a `safeJsonParse(raw, fallback, context)` helper that returns a fallback (`null`, `[]`, `{}`) on bad input and logs the failure with row context. Apply anywhere a list endpoint reads a JSON blob column from SQLite.
-
-```ts
-// WRONG: one bad row crashes the full response
-const data = rows.map(r => ({
-  id: r.id,
-  raw: JSON.parse(r.storedJson),   // throws if storedJson is null/corrupt
-}));
-
-// RIGHT: fail gracefully per-row
-const data = rows.map(r => {
-  try {
-    return { id: r.id, raw: JSON.parse(r.storedJson) };
-  } catch {
-    return { id: r.id, raw: null };  // or omit the row: return null
-  }
-}).filter(Boolean);
-```
-
-**Apply:** any time you write `rows.map(r => JSON.parse(r.someJsonColumn))`, wrap it.
+**Companion failure mode: list endpoint 500.** The same bare-parse risk applies to consumer GET routes (list/all/feed endpoints) that call `JSON.parse` inside a `.map()` callback on stored blob columns. One corrupt row throws a `SyntaxError` that propagates out of `.map()` and 500s the **entire response**; all healthy sibling rows are lost and the consumer feed goes dark. Degrading the bad row to a fallback while returning healthy siblings is always the better failure mode. Fix: a `safeJsonParse(raw, fallback, context)` helper that returns a fallback (`null`, `[]`, `{}`) on bad input and logs the failure with row context. Apply anywhere a list endpoint reads a JSON blob column.
 
 ## SQLite `busy_timeout` Alongside WAL Mode
 
@@ -1193,7 +1167,7 @@ const adapter = new PrismaLibSql({ url });
 return new PrismaClient({ adapter });
 ```
 
-**Related:** `PrismaLibSql` itself expects a **Config object** `{ url, authToken? }`, not a pre-constructed `@libsql/client` instance (documented above). These are two separate gotchas that can compound: wrong constructor argument to the adapter AND redundant `datasourceUrl` to PrismaClient.
+**Related:** `PrismaLibSql` itself expects a **Config object** `{ url, authToken? }`, not a pre-constructed `@libsql/client` instance (documented above). These are two separate gotchas that can compound: wrong constructor argument to the adapter AND a redundant datasourceUrl to PrismaClient.
 
 ## Bash Monitoring Scripts: Alert-Once-Then-Suppress via Marker State
 
@@ -1279,15 +1253,17 @@ for (const [key, value] of Object.entries(req.query)) {
 
 **When it matters:** Any Express route that builds a URL from `req.query` to forward to a downstream service (OAuth callbacks, search proxies, redirect handlers). A missing value here can silently break the OAuth state parameter, causing auth failures that are hard to trace.
 
-## OAuth Bootstrap: A Copied Token Gets Revoked on Source Rotation
+## OAuth Bootstrap: Copied Token Gets Revoked on Source Rotation
 
-When bootstrapping a service's auth by **copying a token from another instance**, the target is now sharing the source's OAuth refresh token. When the source rotates (via its own relogin cron or any auth refresh), the old token value is invalidated and the target immediately 401s ("Invalid authentication credentials").
+When bootstrapping a service's auth by **copying a token from another instance**, the target is now sharing the source's OAuth refresh token. When the source rotates (via its nightly relogin cron or any auth refresh), the old token value is invalidated and the target immediately 401s ("Invalid authentication credentials").
 
-**The bootstrap is a stopgap only.** Immediately after bootstrapping, give the target its own independent login, then verify auth health again. Once the target has its own token, it self-refreshes normally and survives future source rotations.
+**The bootstrap is a stopgap only.** Immediately after bootstrapping, give the target its own independent login, then verify its health endpoint reports auth OK again. Once the target has its own token, it self-refreshes normally like every other sibling and survives future source rotations.
 
-**Env export gotcha in the relogin cron:** use `set -a; . $HOME/.env; set +a` rather than `. $HOME/.env && cmd`:
-- `. $HOME/.env && cmd` sources variables but does NOT export them; downstream scripts that reference them as env vars get an empty value.
-- `set -a; . $HOME/.env; set +a; cmd` forces all sourced variables to be automatically exported, so they are visible to child processes.
+**Sourcing env vars for the relogin command:** use `set -a; . "$HOME/.env"; set +a` rather than `. "$HOME/.env" && cmd`.
+- `. "$HOME/.env" && cmd` sources variables but does NOT export them; downstream scripts that reference them as env vars get an empty value.
+- `set -a; . "$HOME/.env"; set +a; cmd` forces all sourced variables to be automatically exported, so they are visible to child processes.
+
+Also add a relogin entry for the new instance to the nightly cron.
 
 ## SQLite UPSERT with Optional Columns: Branch by Presence to Avoid Null Overwrite
 
@@ -1346,7 +1322,7 @@ if (!(result.length === 1 && result[0].quick_check === "ok")) {
 db.pragma("journal_mode = WAL");
 ```
 
-**Companion: proactive cron between restarts.** `getDb()` only runs on process start; corruption that occurs mid-run is undetected until the next restart. Add a standalone integrity-check cron script (e.g. `scripts/check-db-integrity.js`, every 30 min) that opens the DB, runs `PRAGMA quick_check`, restores from backup if needed, and restarts the process so the app reconnects to the clean file.
+**Companion: proactive cron between restarts.** `getDb()` only runs on process start; corruption that occurs mid-run is undetected until the next restart. Add a standalone integrity-check cron script (e.g. `scripts/check-db-integrity.js`, every 30 min) that opens the DB, runs `PRAGMA quick_check`, restores from backup if needed, and restarts the process manager's entry via `pm2 restart <name>` so the app reconnects to the clean file.
 
 **Key implementation details:**
 - Iterate backups newest-first and open each readonly before trusting it; a backup may itself be corrupted.
@@ -1354,7 +1330,7 @@ db.pragma("journal_mode = WAL");
 - Always send a real alert (not just a log line) on both detected corruption and restore failure; this is a production data-loss event.
 - `checkDbHealth()` should also call `quick_check` so the `/api/health` endpoint reflects DB integrity, not just app liveness.
 
-**When to apply:** Any `better-sqlite3` or `sqlite3` app with an existing backup cron (a daily `.backup` command is the standard). The check adds <5ms to cold start.
+**When to apply:** Any `better-sqlite3` or `sqlite3` app with an existing backup cron (daily `.backup` command is the standard). The check adds <5ms to cold start.
 
 ## Multi-Pass AI Content Generation: Editor Commentary Placement
 
@@ -1374,18 +1350,18 @@ itself, starting with the TLDR / top-line summary.
 
 **Scope:** Applies to any pipeline where a second LLM call edits, expands, or annotates the output of a first call and the result is shown directly to a user.
 
-### The Narration Strip Must Cover Both Ends, Not Just the Front
+### The narration strip must cover both ends, not just the front
 
 The fix above moves editor commentary to the BOTTOM of the output. The rendering side needs its own fix to match: a strip/redaction control that removes model narration from a rendered page has two ends, and a control keyed off "where the content starts" only ever reaches one of them.
 
-A typical extractor peels the leading narration run off the front of a refined document, then treats everything from the document's first heading onward as content. That's correct for the front, but the refinement prompt (per the fix above) asks the model to place its editing log at the END under an `## Editor Notes` heading, and the front-only peel never reaches it. Measured against one production corpus, **46% of stored documents** carried a trailing Editor Notes section, and the model's internal QA log rendered as a visible content section AND a navigation anchor on every one of them.
+A typical implementation peels the leading narration run off the front of a refined document, then treats everything from the first heading onward as the content. That's correct for the front, but the refinement prompt (per the fix above) asks the model to place its editing log at the END under an `## Editor Notes` heading, and the front-only peel never reaches it. Measured against one production corpus: **46% of stored documents** carried a trailing Editor Notes section, and the model's internal QA log rendered as a visible content section AND a navigation anchor on every one of them.
 
-**Fix:** add a second, trailing peel alongside the existing leading-narration peel, gated on the editor-notes heading being the LAST heading in the document (a document that instead *opens* with such a heading keeps its real sections below it, a different shape). Preserve anything the app itself appends after the model's text (link-verification banners, attribution footers); never fold those into the disclosure, only the model's own trailing commentary.
+**Fix:** add a second, trailing peel alongside the existing leading-narration peel, gated on the editor-notes heading being the LAST heading in the document (a document that instead *opens* with such a heading keeps its real sections below it: a different shape). Preserve anything the app itself appends after the model's text (link-verification banners, engine-attribution footers); never fold those into the disclosure, only the model's own trailing commentary.
 
 **Rules:**
-1. A strip/redaction control has TWO ends. If it keys off "where the content starts," check separately whether the same instruction that created the leading-narration problem also creates a trailing one. Here, the very fix that told the model to move commentary to the bottom created a new place for it to leak from.
-2. Measure the corpus before believing a peel is complete, not just a hand-picked example. A production sweep finds the true blast radius that a single test case misses.
-3. Shared, verbatim-identical pipeline code needs the fix applied to every copy, even where only one app's production data shows the symptom. The others don't currently emit the heading, but the shared function does, and the next prompt change could make them start.
+1. A strip/redaction control has TWO ends. If it keys off "where the content starts," check separately whether the same instruction that created the leading-narration problem also creates a trailing one (here: the very fix that told the model to move commentary to the bottom created a new place for it to leak from).
+2. Measure the corpus before believing a peel is complete, not just a hand-picked example. A production sweep finds the true blast radius that a single test case would miss.
+3. Shared, verbatim-identical pipeline code needs the fix applied to every copy even where only one app's production data shows the symptom. The others don't currently emit the heading, but the shared function does, and the next prompt change could make it start.
 
 ## Webhook Queue: Array-Based Queue Over Promise Chains
 
@@ -1474,25 +1450,25 @@ When building an AI agent that researches and recommends (restaurants, vendors, 
 
 **Phase 1: Initial Shortlist.** Broad search across sources. Output: ranked list of N candidates.
 
-**Phase 2: Deep Review (highest value).** For each shortlisted candidate, extract **verbatim quotes** (2-4 per source: maps/review sites, forums, editorial). Do NOT paraphrase; exact quotes are the trust signal. Apply explicit **Disqualification Triggers**:
+**Phase 2: Deep Review (highest value).** For each shortlisted candidate, extract **verbatim quotes** (2-4 per source). Do NOT paraphrase; exact quotes are the trust signal. Apply explicit **Disqualification Triggers**:
 - Declining quality trend (reviews mentioning "used to be good")
 - Hygiene or service red flags in recent reviews
-- Rating trend reversal in the last 6 months
-- Hard criteria mismatch (permanently closed, no matching offering, out of price range)
+- Rating trend reversal in last 6 months
+- Hard criteria mismatch (permanently closed, no matching items, out of price range)
 
 Output two sections: **What people are saying** (quoted snippets with attribution) and **Disqualified** (removed candidates with reason). Transparency in rejection demonstrates the agent applied real judgment; it is UX-critical, not optional.
 
-**Phase 3: Specialty Verification.** For each surviving candidate, answer the specific expertise question (signature offerings, pricing, key differentiators) by consulting official sites or authoritative sources.
+**Phase 3: Specialty Verification.** For each surviving candidate, answer the specific expertise question (signature items, pricing, key differentiators) by consulting official sites or authoritative sources.
 
 **Implementation notes:**
-- Increase the LLM timeout for each additional phase; each substantive phase adds 3-5 minutes, so set timeout to `(N_phases × 5 min) + buffer`
+- Increase the LLM call timeout for each additional phase; each substantive phase adds 3-5 minutes; set timeout to `(N_phases × 5 min) + buffer`
 - Verbatim quote extraction is non-negotiable: paraphrasing erodes trust; exact quotes build it
 - Disqualification criteria must be **explicit and checkable**, not vague sentiment
 - Disqualification is UX-critical: it shows verification was real, not just a shortlist
 
-**When to apply:** Any structured research task with candidate evaluation. Not needed for simple single-answer lookups.
+**When to apply:** Any structured research task with candidate evaluation: restaurants, vendors, purchasing decisions, service providers. Not needed for simple single-answer lookups.
 
-## `for…of` Loop: Don't Assign to a `const` Loop Variable
+## `for…of` Loop: Don't Assign to `const` Loop Variable (Crash Loop Gotcha)
 
 Trying to reassign a `for…of` loop variable declared with `const` (or from destructuring with `const`) throws `TypeError: Assignment to constant variable` and crashes the loop, turning the crash into a crash loop if the process manager auto-restarts:
 
@@ -1504,7 +1480,7 @@ for (const evt of db.prepare('SELECT * FROM events').iterate()) {
 }
 ```
 
-**Fix:** Use `let`. Also: nulling a loop variable to "help GC" is cargo-cult code in most cases; modern JS releases the reference when the block exits. Drop the null assignment unless you have measured a real benefit in a memory-constrained batch loop (see the V8 nullification section above, which uses `let` precisely for this reason).
+**Fix:** Use `let`. Also: nulling a loop variable to "help GC" is cargo-cult code; modern JS releases the reference when the block exits. Drop the null assignment.
 
 ```javascript
 // CORRECT
@@ -1523,7 +1499,9 @@ const { summary, lastId, count } = buildSummaryFromIterator(sinceId, MAX);
 
 Use `let` for any variable you intend to update after the initial binding.
 
-**Same applies to function-scope `const` null-for-GC patterns:**
+**Why:** this caused a crash loop where a summarizer destructured with `const` and the loop body tried `evt = null` to release memory. Every invocation crashed before advancing the cursor timestamp, causing the process manager to restart and re-attempt indefinitely.
+
+**Same applies to function-scope `const` null-for-GC patterns.** After a function body finishes, "help GC" null assignments on `const`-declared accumulators throw the same error:
 ```javascript
 // WRONG: cargo-cult GC hint on const variables crashes the function
 const appDurations = {};
@@ -1532,13 +1510,11 @@ const fileCounts   = {};
 appDurations = null; // TypeError: Assignment to constant variable
 fileCounts   = null;
 ```
-**Fix:** Remove the null assignments entirely, or declare with `let` if you genuinely need them.
+**Fix:** Remove the null assignments entirely. Modern JS GC reclaims function-scope variables when the call frame exits.
 
-**Why it's costly:** a summarizer that crashes this way never advances its cursor, so the process manager restarts it and it re-attempts the same window indefinitely.
+### Slug Guard: Always Return `[]` on Empty Derived Slug
 
-## Slug Guard: Always Return `[]` on Empty Derived Slug
-
-When converting a string to a slug for use as a URL path segment, guard against returning an empty string. A slug-generation function that strips all non-alphanumeric characters from an empty or special-character-only input (e.g. `""`, `"!!!"`, `"   "`) produces `""`, which, if not caught, gets used as a URL path segment and probes a root endpoint. Root endpoints return HTTP 200, causing a false-positive "found" match.
+When converting a string to a slug for use as a URL path segment, guard against returning an empty string. A slug-generation function that strips all non-alphanumeric characters from an empty or special-character-only input (e.g. `""`, `"!!!"`, `"   "`) produces `""`, which, if not caught, gets used as a URL path segment and probes a root endpoint. Root endpoints usually return HTTP 200, causing a false-positive "found" match.
 
 ```javascript
 // WRONG: empty/whitespace input returns [''] which probes root URLs
@@ -1555,21 +1531,20 @@ function slugify(name) {
 }
 ```
 
-This applies to any pattern where a derived identifier is used to construct a URL (job-board slugs, API org names, subdomain components). An empty slug probing root URLs causes false positives that waste probes and may return wrong results.
+This applies to any pattern where a derived identifier is used to construct a URL (API org names, subdomain components, third-party board slugs). An empty slug probing root URLs causes false positives that waste probes and may return wrong results.
 
-**Also filter after the call:** an empty slug that reaches a comparison is worse than useless, because `includes('')` is always true and matches every candidate:
+**Validate the output, not just the input.** Empty slugs also break comparisons: `includes('')` is always true, so an empty derived slug matches every candidate in a lookup list. After any slugify/normalize call that feeds a lookup or comparison, filter out empty strings:
 
 ```js
-// WRONG: slugify('') returns [''] not [], empty slug slips through
-return slugify(name);
-
 // RIGHT: filter out empty strings after normalization
-return slugify(name).filter(s => s.length > 0);
+function getCandidateSlugs(name) {
+  return slugify(name).filter(s => s.length > 0);
+}
 ```
 
-## Shell Script Network Calls: Always Set Timeouts on `curl` and `ssh`
+### Shell Script Network Calls: Always Set Timeouts on `curl` and `ssh`
 
-Unattended shell scripts (cron jobs, process-manager start scripts, metric push workers) that call `curl` or `ssh` without timeouts will hang indefinitely if the remote host is slow or unreachable. This stalls the managed process, blocks the flock, and causes the next cron tick to queue behind it.
+Unattended shell scripts (cron jobs, start scripts, metrics push workers) that call `curl` or `ssh` without timeouts will hang indefinitely if the remote host is slow or unreachable. This stalls the managed process, blocks the flock, and causes the next cron tick to queue behind it.
 
 **curl:** always pass `--max-time <seconds>` (total) and `--connect-timeout <seconds>` (TCP handshake only):
 
@@ -1586,6 +1561,8 @@ ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 user
 Without these, a single hung SSH or curl stalls the whole process indefinitely; no alert fires, and the cron is silently blocked until the process is killed manually.
 
 ## Client-Side Storage Schema Validation
+
+### `localStorage` / `sessionStorage`: Validate Schema on Load
 
 `JSON.parse()` succeeds on structurally-valid JSON that violates the current app schema: an older object missing required fields, a manually-edited value, or a truncated write. Reading undefined properties on the result throws silently downstream or crashes components.
 
@@ -1617,7 +1594,7 @@ function loadState(): AppState {
 
 ## Required-Field Validation in User-Authored Config/YAML Parsers
 
-When parsing user-authored YAML, JSON, or dict-based config files, never access required keys via raw dict indexing (`d["type"]` -> cryptic `KeyError: 'type'`). Use a helper that raises a descriptive error naming both the missing field and its location in the document.
+When parsing user-authored YAML, JSON, or dict-based config files, never access required keys via raw dict indexing (`d["type"]` produces a cryptic `KeyError: 'type'`). Use a helper that raises a descriptive error naming both the missing field and its location in the document.
 
 ```python
 def _require(d: dict, key: str, context: str):
@@ -1638,20 +1615,20 @@ With `_require`: the crash becomes `ValueError: Scenario entity #3 is missing re
 
 ## Autonomous Agent Repos: Gitignore Runtime State Files
 
-In repos where a cron `claude -p` loop creates agent branches, any file that the RUNNER writes and the AGENT also touches via git will cause **branch-snowball drift**:
+In repos where a scheduled `claude -p` loop creates agent branches, any file that the RUNNER writes and the AGENT also touches via git will cause **branch-snowball drift**:
 
 1. Agent creates branch `claude/task-N` from `main`.
 2. Runner writes to a tracked runtime state file (dedup JSON, cron log, outcome JSONL).
 3. That file drifts on the branch.
 4. The next agent run branches off the drifted branch instead of `main` (the runner reads `HEAD`, which is still on the branch after a stale checkout).
-5. The snowball accumulates: a dozen or more commits pile up on a branch that was supposed to stay small.
+5. The snowball accumulates: 14+ commits pile up on a branch that was supposed to stay small.
 
 **Fix:** Gitignore all runtime state written by the autonomous loop itself. Keep only config and intentional human-authored history.
 
 Files to gitignore in an autonomous agent repo:
 - Dedup/error-handler state JSON (`*.error-handler-state.json`, `reviewer-state.json`)
 - Cron and run logs (`logs/*.log`, `logs/run-*.log`)
-- Output data streams (`.outcomes.jsonl`, `*-comparison.jsonl`)
+- Output data streams (`.outcomes.jsonl`, comparison JSONL)
 - Automated reports/scores generated each cycle (`reports/`, `scores/`)
 - Runtime lock files (`.running.lock`, `state.json`)
 
@@ -1683,27 +1660,29 @@ When a loop processes a batch (DB rows, files, API records) and each iteration p
 
 **Bonus:** Compile invariant regexes **once before** the loop, not per-iteration, to avoid repeated throws and wasted compile time.
 
-**Real-world shape:** a feature that compiled `new RegExp(template.pattern)` from stored templates at three call sites with no guard. One malformed stored pattern threw `SyntaxError` and 500'd the endpoint for all of the user's records, not just the bad one.
+**Seen in practice:** an auto-detection feature called `new RegExp(template.pattern)` on stored, user-editable templates at three sites with no guard. One malformed pattern threw `SyntaxError` and 500'd the endpoint for every one of the user's records, not just the bad one.
 
 ## PM2 Stop Is Not Durable Against Deploy-Path Restarts
 
-`pm2 stop <app>` + `pm2 save` does NOT permanently stop an app. If the app has its own deploy script (or any automation path) that calls `pm2 restart`, `pm2 startOrRestart`, or `pm2 start`, the app will come back online after the next deploy, overriding the saved stopped state. Services stopped and saved months earlier are routinely found fully online again for exactly this reason.
+`pm2 stop <app>` plus `pm2 save` does NOT permanently stop an app. If the app has its own deploy script (or any automation path) that calls `pm2 restart`, `pm2 startOrRestart`, or `pm2 start`, the app will come back online after the next deploy, overriding the saved stopped state.
+
+This recurs on memory-constrained hosts: several staging services were stopped and saved, yet were found fully online weeks later because their deploy paths call `pm2 startOrRestart`.
 
 **Solutions:**
 
-- **`pm2 delete` + remove from the ecosystem config**: only viable for apps with no active deploy path. Permanent removal, not just a stop.
+- **`pm2 delete` plus removal from the ecosystem config**: only viable for apps with no active deploy path. Permanent removal, not just a stop.
 
-- **Ondemand-waker pattern**: for low-traffic apps that need to stay launchable but shouldn't run 24/7, put a proxy in front of the app's process. The waker `pm2 start`s the app on the first request, then an idle reaper `pm2 stop`s it after N minutes of no traffic. Crucially, the reaper also re-stops any KEEP_STOPPED apps that were externally revived, making the stopped state durable against deploy-path restarts. Point the reverse proxy's upstream at the waker instead of the app's direct port.
+- **Ondemand-waker pattern**: for low-traffic apps that need to stay launchable but shouldn't run 24/7, put a proxy in front of the app's process. The waker `pm2 start`s the app on the first request, then an idle reaper `pm2 stop`s it after N minutes of no traffic. Crucially, the reaper also re-stops any KEEP_STOPPED apps that were externally revived, making the stopped state durable against deploy-path restarts. Point the reverse proxy's `ProxyPass` at the waker instead of the app's direct port.
 
 - **Remove the staging start from deploy scripts**: if a "staging" variant keeps coming back, trace the deploy script and remove the `pm2 start <staging-app>` call from it.
 
-**Why it matters:** On a memory-constrained host, every always-on Next.js `next-server` costs 60-170MB. Stopped apps coming back online erodes the headroom that other work depends on.
+**Why it matters:** a host running ~33 always-on PM2 processes on under 4GB of RAM has little headroom (each Next.js `next-server` uses 60-170MB). Stopped apps coming back online erodes the memory that offloads and autonomous jobs depend on.
 
-**Restarting a waker-managed app correctly:** Don't `pm2 start`/`pm2 restart` a waker-managed app directly. The waker tracks `lastSeen` per app; an app started outside the waker has `lastSeen` defaulting to `0`, so the next reaper tick sees it as long-idle and immediately stops it again, a restart that appears to silently fail seconds later for no visible reason. To restart correctly, either make a request through the waker (`curl http://127.0.0.1:<waker-port>/<prefix>`) or let it wake from real traffic.
+**Restarting a waker-managed app correctly:** Don't `pm2 start`/`pm2 restart` a waker-managed app directly. The waker tracks `lastSeen` per app; an app started outside the waker has `lastSeen` defaulting to `0`, so the next reaper tick sees it as long-idle and immediately stops it again: a restart that appears to silently fail seconds later for no visible reason. To restart correctly, either make a request through the waker (`curl http://127.0.0.1:<waker-port>/<prefix>`) or let it wake from real traffic.
 
-## Cron Script Failure Alerting: EXIT Trap + Shared Alert Helper
+## Cron Script Failure Alerting: EXIT Trap + Shared Email Helper
 
-Silent failures in unattended cron scripts are a top cause of auth expiry going undetected for days. When a cron script can fail without triggering an alert, add an EXIT trap that notifies on non-zero exit.
+Silent failures in unattended cron scripts are the top cause of auth expiry going undetected for days. When a cron script can fail without triggering an alert to your notification channel, add an EXIT trap that emails on non-zero exit.
 
 **Pattern:**
 ```bash
@@ -1713,17 +1692,17 @@ alert_email() {
   "$SCRIPT_DIR/send-alert-email.sh" "$subject" "$body" 2>/dev/null || true
 }
 
-trap 'rc=$?; [[ $rc -ne 0 ]] && alert_email "script-name failed (exit $rc)" "$(tail -5 "$LOG_FILE" 2>/dev/null)"' EXIT
+trap 'rc=$?; [[ $rc -ne 0 ]] && alert_email "⚠️ script-name failed (exit $rc)" "$(tail -5 "$LOG_FILE" 2>/dev/null)"' EXIT
 ```
 
 **Rules:**
-- The alert helper should read its credentials from a file outside the repo and **exit 0 even on send failure**; alerting must never break the caller or change the cron's exit code.
-- Use an `EXIT` trap (not `ERR`) so the alert fires on any non-zero exit, including `set -e` aborts mid-script.
-- For failure modes that produce exit 0 but didn't actually complete (e.g. an account mismatch after OAuth rotation), also alert inline with a direct call; the EXIT trap alone won't catch these.
+- The alert helper should read its SMTP credential from a file outside the repo and **exit 0 even on send failure**; alerting must never break the caller or extend the cron's exit code.
+- Use the `EXIT` trap (not `ERR`) so the alert fires on any non-zero exit, including `set -e` aborts mid-script.
+- For failure modes that produce exit 0 but didn't actually complete (e.g. an account-mismatch after OAuth rotation), also alert inline with a direct call to `alert_email`; the EXIT trap alone won't catch these.
 
 **Where to apply:** Any unattended cron script doing auth rotation, credential refresh, or other critical actions where silent failure causes downstream outages.
 
-**Refinement: suppress email for known-benign recurring failures, keep the lower-priority channel.** Not every non-zero exit deserves an inbox page. If a specific failure mode is diagnosed as recurring, self-healing, and already covered by an independent recovery mechanism, set a local `SUPPRESS_EXIT_EMAIL` flag before that branch and check it in the EXIT trap: post to your notification channel as usual (still useful as a low-priority signal) but skip the email. Keep the suppression scoped to the *specific classified error kind*, not the whole script, so a genuinely new failure mode still pages.
+**Refinement: suppress email for known-benign recurring failures, keep the lower-priority channel.** Not every non-zero exit deserves an inbox page. If a specific failure mode is diagnosed as recurring, self-healing, and already covered by an independent recovery mechanism, set a local `SUPPRESS_EXIT_EMAIL` flag before that branch and check it in the EXIT trap: post to your notification channel as usual (still useful as a low-priority signal) but skip `alert_email`. Keep the suppression scoped to the *specific classified error kind*, not the whole script, so a genuinely new failure mode still emails. Example: a nightly auth-age expiry that recurs whenever the auth age lapses, while the service keeps serving via its refresh token and a separate 10-minute health-driven restart script catches real token death; the nightly email was pure noise while the underlying condition was already handled elsewhere.
 
 ## Suspending an Autonomous Agent: Full Checklist
 
@@ -1731,82 +1710,85 @@ When permanently suspending an autonomous service, stopping the process manager 
 
 **Checklist (run on EVERY machine that runs the agent):**
 - [ ] `pm2 stop <service> && pm2 save`: prevents auto-restart on reboot or deploy
-- [ ] Comment out all cron entries for the agent (`# PAUSED YYYY-MM-DD`); a cron that calls `run.sh` directly bypasses the process manager and can restart the agent as a side effect
+- [ ] Comment out all cron entries for the agent (`# PAUSED YYYY-MM-DD`): a cron that calls `run.sh` directly bypasses the process manager and can restart the agent as a side effect
 - [ ] Add `SUSPENDED.md` in the repo root with: date, reason, machine(s) affected, resume instructions
-- [ ] Verify journal/channel entries stop within one cron cycle
+- [ ] Verify journal/notification entries stop within one cron cycle
 
-**Why multi-machine matters:** An agent suspended on one host can keep running on another with a fully independent installation: its own process manager, its own crontab, and no `SUSPENDED.md`. The remote copy keeps firing its loop and posting output for days after the "suspension." Fix: SSH to each remote host, comment out cron entries (`sed "/service-name/s/^/# PAUSED YYYY-MM-DD /"`), and add `SUSPENDED.md` to the repo on that machine.
+**Why multi-machine matters:** one agent was suspended on the workstation (pm2 stop plus pm2 save) but a remote VM had a fully independent installation with its own process manager, crontab, and no SUSPENDED.md. The VM continued firing its fast-loop cron every 30 minutes, posting noise for 2 days after the workstation-side suspension.
 
-## Cron Jobs That Invoke `claude` Need Absolute Binary Paths (a Double PATH Trap)
+Fix on each remote host: SSH in, comment out cron entries with `sed "/service-name/s/^/# PAUSED YYYY-MM-DD /"`, and add SUSPENDED.md to the repo on that machine.
 
-Cron runs with a minimal PATH (`/usr/bin:/bin`) that does NOT include `/usr/local/bin`, where a global `claude` install lives. Scripts that invoke the `claude` CLI face a two-layer PATH failure:
+### Cron jobs that invoke `claude` must use an absolute binary path
 
+Cron runs with a minimal PATH (`/usr/bin:/bin`) that does NOT include `/usr/local/bin`, where the global `claude` install lives. A cron script calling bare `claude ...` fails silently with `claude: command not found` (exit 127). In one case this broke a host's CLI auth keep-alive for ~10 days: every run failed, the OAuth refresh token expired from disuse, and the CLI started returning 401, with no alert.
+
+This is a two-layer PATH trap:
 1. `/usr/local/bin/claude` is not on PATH -> `claude: command not found` (exit 127)
-2. `claude` is itself a **Node.js script** (`#!/usr/bin/env node`), so even after fixing `CLAUDE_BIN`, cron also lacks `node` -> `env: node: No such file or directory` (exit 127) before any auth or business logic runs.
+2. `claude` is itself a **Node.js script** (`#!/usr/bin/env node`), so even after fixing the binary path, cron also lacks `node` -> `env: node: No such file or directory` (exit 127) before any auth or business logic runs.
 
-Both failures are silently swallowed if the cron wrapper treats exit 127 as "transient" and doesn't alert. A CLI auth keep-alive broken this way can run dead for over a week, letting the OAuth refresh token expire from disuse with no alert.
+Both failures are silently swallowed if the cron wrapper treats exit 127 as "transient" and doesn't alert. The script runs dead indefinitely.
 
-**How to apply:**
+How to apply:
 - Resolve the binary up front: `CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo /usr/local/bin/claude)}"` and call `"$CLAUDE_BIN"`. Works under both interactive PATH and bare cron PATH.
-- Prepend both bin dirs: `export PATH="$(dirname "$(command -v node 2>/dev/null || echo /usr/local/bin/node)"):$(dirname "$CLAUDE_BIN"):$PATH"`
-- Validate under cron's minimal environment before deploying: `env -i PATH=/usr/bin:/bin HOME=$HOME bash your-script.sh`
-- Prefer auth keep-alives that do NOT depend on the CLI at all: refresh directly via the OAuth `refresh_token` grant (curl + python3).
-- The OAuth `refresh_token` grant is rate-limited account-wide: several refreshes in a few minutes can trip a sustained 429 throttle (observed lasting hours) that blocks every host on the account. Never loop-retry a refresh; space attempts hours apart and let cron self-heal. A fresh `claude auth login` (authorization_code grant) is a separate bucket if you must recover sooner.
+- Prepend both bin dirs: `export PATH="$(dirname "$(command -v node 2>/dev/null || echo /usr/local/bin/node)"):$(dirname "$CLAUDE_BIN"):$PATH"`.
+- Verify the whole script under cron conditions: `env -i PATH=/usr/bin:/bin HOME=$HOME bash your-script.sh`.
+- Prefer auth keep-alives that do NOT depend on the CLI at all: refresh directly via the OAuth `refresh_token` grant (curl plus a small script).
+- The OAuth `refresh_token` grant is rate-limited account-wide: 3+ refreshes in a few minutes trips a sustained 429 throttle (observed lasting ~2h) that blocks BOTH hosts. Never loop-retry a refresh; space attempts hours apart and let cron self-heal. A fresh `claude auth login` (authorization_code grant) is a separate bucket if you must recover sooner.
 - Always pair an auth keep-alive with a probe that alerts on failure, so a silent keep-alive failure surfaces in hours, not days.
 - Refresh tokens ROTATE and are single-use: two hosts cannot share one credentials chain (whoever refreshes first breaks the other). Give each host its own `claude auth login` device session.
 
-## Parallel Bash Calls Race on Persisted Shell cwd: Always `cd` With an Absolute Path
+### Parallel Bash calls race on persisted shell cwd: always cd with an absolute path explicitly
 
-When two Bash tool calls are issued in the same message (parallel), the working directory is a single persisted shell state shared across them. If call A does `cd /repo-x && npm run build` and call B (in the same parallel batch) just runs `npm run build` assuming an earlier command's cwd still holds, the two calls can race and B executes in whatever directory A leaves the shell in, producing a false-positive "build passed" read against the WRONG repo. This has happened silently, with no error; it was caught only because printed route names didn't match the target repo.
+When two Bash tool calls are issued in the same message (parallel), the working directory is a single persisted shell state shared across them. If call A does `cd /repo-x && npm run build` and call B (in the same parallel batch) just runs `npm run build` assuming an earlier command's cwd still holds, the two calls can race and B executes in whatever directory A leaves the shell in, producing a false-positive "build passed" read against the WRONG repo. Observed: a check intended for one repo returned another repo's Next.js route table, silently, with no error. Caught only because the printed route names didn't match the target repo.
 
-**How to apply:** in every Bash tool call that will run alongside others in a parallel batch, put an explicit `cd <absolute-path> &&` at the start of the command. Never depend on a prior tool call's `cd` persisting when there are concurrent siblings issued this turn. Applies to any agent doing multi-repo build/test sweeps in parallel.
+How to apply: in every Bash tool call that will run alongside others in a parallel batch, put an explicit `cd <absolute-path> &&` at the start of the command; never depend on a prior tool call's cd persisting when there are concurrent siblings issued this turn. Applies to any agent doing multi-repo build/test sweeps in parallel.
 
-## Follow-Mode Log Commands Piped Into `head` Leak a Shell Process Forever
+### Follow-mode log commands piped into head leak a shell process forever
 
-A streaming log command piped into something that exits early leaks a shell process FOREVER. Observed in the wild: `pm2 logs <app> --lines 100 2>&1 < /dev/null | head -200` still running 41 days later. `pm2 logs` follows by default and never exits; `head -200` closes the pipe after 200 lines; pm2 does not die on the resulting SIGPIPE, so the wrapping bash waits on it indefinitely.
+A streaming log command piped into something that exits early leaks a shell process FOREVER. Found in one audit: `pm2 logs <app> --lines 100 2>&1 < /dev/null | head -200` had been running for 41 days. `pm2 logs` follows by default and never exits; `head -200` closes the pipe after 200 lines; pm2 does not die on the resulting SIGPIPE, so the wrapping bash waits on it indefinitely. Two sibling orphans (21 days) and an abandoned CLI session (15 days) were reaped in the same sweep.
 
-**Rules:**
+Rules:
 
 1. **Never run a follow-mode log command from an agent Bash call without disabling follow.** Use `pm2 logs <app> --nostream --lines N`. The same trap applies to `tail -f`, `journalctl -f`, `docker logs -f`, and `kubectl logs -f`: prefer the tool's own non-streaming flag over piping into `head`.
 
 2. **If a non-streaming flag does not exist, bound it externally**: `timeout 10 <cmd> | head -N`. Piping into `head` alone is NOT sufficient, because it relies on the producer handling SIGPIPE.
 
-3. **These leaks are invisible in normal monitoring.** Each orphan held only ~1 MB RSS, so no memory alert ever fired; they were found only by `ps -o pid,etime` during an unrelated audit. Periodically sweep for long-lived `bash -c source .../shell-snapshots/` processes, which are the signature of a leaked agent Bash call.
+3. **These leaks are invisible in normal monitoring.** Each orphan held only ~1 MB RSS, so no memory alert ever fired; they were only found by `ps -o pid,etime` during an unrelated audit. Periodically sweep for long-lived `bash -c source .../shell-snapshots/` processes, which are the signature of a leaked agent Bash call.
 
-4. **The `claude` CLI ignores SIGTERM.** Reaping it needs a SIGTERM then SIGKILL escalation; this is the same reason long-running bridge servers implement their own SIGTERM -> SIGKILL grace period rather than relying on spawn's `timeout` option.
+4. **The `claude` CLI ignores SIGTERM.** Reaping it needs a SIGTERM then SIGKILL escalation; design long-running child-process supervisors with their own SIGTERM -> SIGKILL grace period rather than relying on a spawn `timeout` option.
 
-## A Data Column Used as a State Machine Makes Failures Invisible to Recovery
+### A data column used as a state machine makes failures invisible to recovery
 
-When a table uses a data column (no dedicated status column) to encode state, e.g. `answer IS NULL` = in-progress, `answer = <failure sentinel>` = failed, anything else = a real answer, every recovery SELECT is a partition of that one column. Writing the wrong value removes a row from every existing recovery query SILENTLY.
+When a table uses a data column (no dedicated status column) to encode state (e.g. `follow_ups.answer IS NULL` = in-progress, `answer = <failure sentinel>` = failed, anything else = real answer), every recovery SELECT is a partition of that one column. Writing the wrong value removes a row from every existing recovery query SILENTLY.
 
-**Rules:**
-1. **A cancel must write a distinct terminal sentinel**, not NULL (gets re-run by orphan recovery on the next deploy) and not the failure sentinel (renders as an error and may be retried). A third string takes the cancelled row out of every existing SELECT with no new clause anywhere.
+Rules:
+1. **A cancel must write a distinct terminal sentinel**: not NULL (gets re-run by orphan recovery on next deploy) and not the failure sentinel (renders as an error and may be retried). A third string takes the cancelled row out of every existing SELECT with no new clause anywhere.
 2. **Write the durable row BEFORE aborting the in-flight work.** Aborting first lets a fast-settling promise win the compare-and-swap in the gap, so the cancel silently does nothing.
-3. **Sentinels are state, not copy.** A sentinel that a SELECT matches must be a shared constant, not a string literal repeated at each write site. Reword it in one place and every already-failed row stops being selectable, with no error anywhere.
-4. **A retry pass that clears the failure marker must RESTORE it if the attempt is deferred.** Otherwise a deferral silently downgrades the user-visible state: the row loses its Retry button and reverts to a spinner.
+3. **Sentinels are state, not copy.** A sentinel that a SELECT matches must be a shared constant, not a string literal repeated at each write site. Reword it in one place and every already-failed row stops being selectable with no error anywhere.
+4. **A retry pass that clears the failure marker must RESTORE it if the attempt is deferred.** Otherwise a deferral silently downgrades the user-visible state; the row loses its Retry button and reverts to a spinner.
 5. **Enumerate every recovery SELECT when you add a new state.** Each SELECT that partitions on the column must either include or deliberately exclude the new state. A SELECT unchanged by the diff can still silently include a row that the new state was meant to exclude.
 
-## A Generator That Claims to Be the Source of Truth for a Live Config Is a Loaded Gun Once It Drifts
+### A generator that claims to be the source of truth for a live config is a loaded gun once it drifts
 
-A config generator (crontab, `ecosystem.config`, nginx/apache vhosts, systemd units, PM2 dumps, k8s manifests) that documents itself as "edit here, generate, never hand-edit the live file" can drift silently for weeks: instrumentation or an emergency fix gets hand-added to the LIVE target, never back-ported to the generator, and nothing fails at the time, because a generator only lies when someone actually runs it. Observed case: a cron registry's generator rendered zero of the live crontab's 76 run-ledger wrapper entries and no `PATH` header. Installing from it would have blinded the run ledger on every job and reintroduced PATH-related exit-127 deaths.
+A config generator (crontab, `ecosystem.config`, nginx/apache vhosts, systemd units, PM2 dumps, k8s manifests) that documents itself as "edit here, generate, never hand-edit the live file" can drift silently for weeks: instrumentation or an emergency fix gets hand-added to the LIVE target, never back-ported to the generator, and nothing fails at the time because a generator only lies when someone actually runs it. In one case a cron registry's generator rendered zero of the live crontab's 76 run-ledger wrapper entries and no `PATH` header; installing from it would have blinded the run ledger on every job and reintroduced PATH-related exit-127 deaths.
 
-**Rule:** before using ANY generator that claims to be a live config's source of truth, diff its output against the live target FIRST and require the diff to be empty. A non-empty diff means the live system has been edited around the generator, which is now a rollback to whenever it was last accurate. Do not install to "fix" the drift. Read the diff, decide which side is right, and back-port the live-only content into the generator (or teach the generator to express what the live target actually contains, e.g. env preambles, wrapper macros, multi-line comments).
+**Rule:** before using ANY generator that claims to be a live config's source of truth, diff its output against the live target FIRST and require the diff to be empty. A non-empty diff means the live system has been edited around the generator, which is now a rollback to whenever it was last accurate. Do not install to "fix" the drift. Read the diff, decide which side is right, and back-port the live-only content into the generator (or teach the generator to express what the live target actually contains: env preambles, wrapper macros, multi-line comments).
 
-**Corollary for a change you cannot deploy right now:** mark the intent in the generator anyway, say plainly that it is documentation and not yet deployed, and leave the live target alone. A half-applied change to a system you cannot verify is worse than a documented gap.
+**Corollary for a change you cannot deploy right now:** mark the intent in the generator anyway, say plainly it is documentation and not yet deployed, and leave the live target alone. A half-applied change to a system you cannot verify is worse than a documented gap.
 
-## A Next.js Standalone Build in a Git Worktree Nests the Server Under `.next/standalone/<path-from-repo-root>`
+### A Next.js standalone build in a git worktree nests the server under `.next/standalone/<path-from-repo-root>`
 
 Building a Next.js app with `output: "standalone"` inside a git worktree whose `node_modules` is a symlink to the parent checkout makes Next trace the workspace root to the PARENT repo. The bundle is then emitted at `.next/standalone/<relative-path-of-worktree>/server.js`, not `.next/standalone/server.js`, and `.next/standalone/.next` does not exist.
 
-**Why:** file tracing resolves the monorepo/workspace root through the symlink target, so every path in the bundle is expressed relative to that root.
+Why: file tracing resolves the monorepo/workspace root through the symlink target, so every path in the bundle is expressed relative to that root.
 
-**How to apply:** when verifying a worktree build locally, locate the entrypoint with `find .next/standalone -name server.js` before copying `.next/static`, `public/`, and `.env` next to it. Do not assume the flat layout that a deploy script produces in the canonical checkout. The deployed layout is unaffected, because a normal checkout has a real `node_modules`.
+How to apply: when verifying a worktree build locally, locate the entrypoint with `find .next/standalone -name server.js` before copying `.next/static`, `public/` and `.env` next to it; do not assume the flat layout that the deploy script produces in the canonical checkout. The deployed layout is unaffected because the deploy target has a real `node_modules`.
 
-## A Collapsed `<details>` Still Mounts and Parses All Its Children
+### A collapsed `<details>` still mounts and parses all its children: lazy-mount for heavy content
 
-An HTML `<details>` keeps its children in the DOM when collapsed; the browser hides them with CSS, but React renders them regardless. So N heavy children (e.g. `react-markdown` + `rehype-sanitize` trees) inside a collapsed `<details>` parse ALL of them on initial render and re-parse on every parent re-render. On a 3-second poll, that means every poll re-parses the whole list even while the section is invisible. This was measured as the dominant lag source on a detail page once its list grew past ~60 items.
+An HTML `<details>` keeps its children in the DOM when collapsed; the browser hides them with CSS, but React renders them regardless. So N heavy children (e.g. `react-markdown` plus `rehype-sanitize` trees) inside a collapsed `<details>` parse ALL of them on initial render and re-parse on every parent re-render. On a 3-second poll, that means every poll re-parses the whole list even while the section is invisible. Measured as the dominant lag source on a detail page once its list grew past ~60 items.
 
-**collapsed != unmounted.** A fresh JSON string each poll also defeats naive identity checks: an array re-serialised each render is a new object reference, so none of the `<details>` children memoize across polls unless their props are primitives.
+**collapsed is not unmounted.** A fresh JSON string each poll also defeats naive identity checks; an array re-serialised each render is a new object reference, so none of the `<details>` children memoize across polls unless their props are primitives.
 
 **How to fix:**
 1. **Lazy-mount**: track an `open` state synced via `onToggle` and render children only `{open && <HeavyContent />}`; nothing parses until the section is actually opened.
@@ -1847,10 +1829,18 @@ import './lib/notify.js';
 
 ## Node.js `fetch` (undici) Default `headersTimeout` Cuts Slow Non-Streaming Backends
 
-Node.js's built-in `fetch` (undici) severs the socket at its default `headersTimeout` of approximately 300 seconds when the peer sends response headers only AFTER computing the whole body, e.g. a backend that does minutes of work then returns the full JSON in one shot. It surfaces as a bare `TypeError: fetch failed` at ~300s, with the real cause buried in `.cause`. **A longer `AbortSignal.timeout(...)` does NOT prevent it**; the signal and the `headersTimeout` are independent limits, and the `headersTimeout` fires first regardless of the signal's bound. `bodyTimeout` (also ~300s default) can bite the same way.
+Node.js's built-in `fetch` (undici) severs the socket at its default `headersTimeout` of approximately 300 seconds when the peer sends response headers only AFTER computing the whole body: a backend that does minutes of work then returns the full JSON in one shot. It surfaces as a bare `TypeError: fetch failed` at ~300s, with the real cause buried in `.cause`. **A longer `AbortSignal.timeout(...)` does NOT prevent it**; the signal and the `headersTimeout` are independent limits, and the `headersTimeout` fires first regardless of the signal's bound. `bodyTimeout` (also ~300s default) can bite the same way.
 
 **Two valid fixes:**
 1. **Custom undici Agent as `dispatcher`:** `new Agent({ headersTimeout: 30 * 60_000, bodyTimeout: 30 * 60_000 })` passed as the `dispatcher` option to `fetch()`.
 2. **`node:http` module:** no `headersTimeout` by default; bound it yourself with `req.setTimeout(ms, () => req.destroy(...))`.
 
-**Symptom pattern:** a slow backend that takes 5+ minutes always fails with `TypeError: fetch failed` at exactly ~300s, and raising the `AbortSignal` timeout does nothing.
+**Symptom pattern:** a slow backend that takes 5+ minutes always fails with `TypeError: fetch failed` at exactly ~300s; raising the `AbortSignal` timeout does nothing.
+
+### `pkill`/`pgrep -f` also matches the shell whose own cmdline contains the pattern
+
+`pkill -f <name>` and `pgrep -f <pattern>` match against FULL command lines, including the shell currently running the matcher. Running `ssh host 'pkill -f myscript.sh; rest...'` gives the remote shell the cmdline `bash -c pkill -f myscript.sh; rest...`, which contains `myscript.sh`, so pkill kills its own shell and everything after it silently never runs (no output, no error; side effects like `rm`/launch skipped). The same trap makes `pgrep -cf PATTERN` inside a compound command overcount by matching the outer shell.
+
+Avoid: do not reference the target name literally in a shell that also runs the matcher. Put the kill in a separate script file whose invocation line lacks the pattern, match a more specific string the killer's own cmdline does not contain, or kill by recorded PID.
+
+Related: `n=$(pgrep -c ... || echo 0)` double-counts a zero to `0\n0`, because `pgrep -c` prints `0` AND exits 1; use `n=$(pgrep -cf ...); n=${n:-0}`.
