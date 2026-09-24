@@ -64,11 +64,11 @@ When opening a PR, also verify:
 
 Some configuration properties look like dead code but are essential for production. Never remove these during fix or cleanup runs without verifying the deployment context:
 
-- **NextAuth/Auth.js**: `basePath`, `redirectProxyUrl`, provider `authorization.params`, `token.params` are required for subpath deployments behind reverse proxies.
-- **Process manager config** (e.g. `ecosystem.config.js`): `env`, `max_memory_restart`, `cwd` are essential for production process management.
-- **Reverse-proxy config references in code**: URL construction that includes basePaths or proxy prefixes.
+- **NextAuth/Auth.js**: `basePath`, `redirectProxyUrl`, provider `authorization.params`, `token.params`: required for subpath deployments behind reverse proxies.
+- **Process manager config (e.g. PM2 `ecosystem.config.js`)**: `env`, `max_memory_restart`, `cwd`: essential for production process management.
+- **Apache/proxy config references in code**: URL construction that includes basePaths or proxy prefixes.
 
-**Why:** an automated crash-fix run once removed `basePath` and `redirectProxyUrl` from an app's `auth.ts` because they appeared unused. This broke OAuth on the subpath deployment and required a manual restore.
+**Why:** an automated crash-fix run removed `basePath` and `redirectProxyUrl` from an app's auth config because they appeared unused. This broke OAuth on the subpath deployment and required a manual restore.
 
 ## Default Review Workflow: Review-Ship-Review
 
@@ -76,15 +76,15 @@ Unless the user explicitly requests a single review pass, use the iterative revi
 
 ### How it works
 
-1. **Implement**: Make the requested changes, run tests, commit.
-2. **Review (round 1)**: Spawn 2-3 parallel reviewer agents. Each agent audits the diff independently, categorizing findings as Critical / Important / Minor / Deferred.
-3. **Fix & commit**: Address all Critical and Important findings. Commit the fixes.
-4. **Review (round 2)**: Spawn fresh reviewer agents on the updated code. Reviewers must not see prior review output; they audit with fresh eyes. This catches regressions introduced by the fixes and surfaces issues the first round missed.
-5. **Repeat**: If round 2 produces Critical or Important findings, fix and run another round. Stop when a review round returns clean (no Critical/Important findings). Minor and Deferred items can be noted but don't block.
+1. **Implement**: make the requested changes, run tests, commit.
+2. **Review (round 1)**: spawn 2-3 parallel reviewer agents. Each agent audits the diff independently, categorizing findings as Critical / Important / Minor / Deferred.
+3. **Fix & commit**: address all Critical and Important findings. Commit the fixes.
+4. **Review (round 2)**: spawn fresh reviewer agents on the updated code. Reviewers must not see prior review output; they audit with fresh eyes. This catches regressions introduced by the fixes and surfaces issues the first round missed.
+5. **Repeat**: if round 2 produces Critical or Important findings, fix and run another round. Stop when a review round returns clean (no Critical/Important findings). Minor and Deferred items can be noted but don't block.
 
 ### Why this is the default
 
-Single-pass reviews miss bugs that only become visible after fixes land. In practice, fix commits introduce new issues a meaningful fraction of the time (wrong variable reuse, stale state, interaction between fixes). The second review round catches these before they ship.
+Single-pass reviews miss bugs that only become visible after fixes land. In practice, fix commits introduce new issues 30-40% of the time (wrong variable reuse, stale state, interaction between fixes). The second review round catches these before they ship.
 
 ### Reviewer agent instructions
 
@@ -112,23 +112,23 @@ Each reviewer agent should:
 | `new Date()` in business logic | Untestable | Inject time as parameter |
 | String concatenation for paths | OS-incompatible | Use `path.join()` |
 | Prisma `globalForPrisma` dev-only cache | Connection leak in production | Cache on `globalThis` unconditionally (see below) |
-| `new Date("2026-04-15")` for display | UTC parse → local timezone off-by-one | Use `new Date(year, month, day)` for local dates |
+| `new Date("2026-04-15")` for display | UTC parse, then local timezone off-by-one | Use `new Date(year, month, day)` for local dates |
 | Shell-interpolating JSON into script strings | Special chars break syntax | Write to temp file, read in target language (see below) |
 | Hardcoded timezone offset `timedelta(hours=-4)` | Breaks at DST transitions | Use `ZoneInfo('America/New_York')` or equivalent TZ library |
 | `head -c N` before parsing structured output | Silent data loss: truncation drops blocks downstream code depends on | Size limit to max expected output, or extract specific fields first |
 | `res.json({ error: err.message })` | Information disclosure: leaks paths, DB strings, stack traces | Return generic message, log details server-side (see below) |
 | `child_process.exec(cmd + userInput)` | Command injection via string interpolation | Use `execFile(binary, [args])` with separate args array (see below) |
-| `parseInt(queryParam)` without `\|\| default` fed to Prisma `skip`/`take` | `parseInt('abc')` is `NaN`; `Math.max(1, NaN)` stays `NaN`; Prisma `skip: NaN` → 500 | `Math.max(1, parseInt(String(raw ?? '1')) \|\| 1)` (the `\|\| 1` catches `NaN`). Define once in a shared helper; hand-rolling the same logic in both an API lib and SSR page components guarantees they diverge |
+| `parseInt(queryParam)` without `\|\| default` fed to Prisma `skip`/`take` | `parseInt('abc')` is `NaN`; `Math.max(1, NaN)` stays `NaN`; Prisma `skip: NaN` gives a 500 | `Math.max(1, parseInt(String(raw ?? '1')) \|\| 1)`: the `\|\| 1` catches `NaN`. Define once in a shared helper; hand-rolling the same logic in both an API lib and SSR page components guarantees they diverge |
 | `if (secret === input)` | Timing attack leaks secret length/content | Use `crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))` |
 | `new URL(userInput)` without scheme check | SSRF via `file://`, `data://`, `javascript://` | Validate `url.protocol` is `http:` or `https:` before use |
 | `path.join(base, userInput)` unsanitized | Path traversal via `../` sequences | Strip `..`, leading `/`, and non-alphanumeric chars from user path segments |
 | `Infinity` in API responses | `JSON.stringify(Infinity)` === `"null"`, client sees `null` not a number | Use a large finite number (e.g., `999999`) for "unlimited" values sent over JSON |
 | Tailwind `@apply text-blue-600` in CSS | `@apply` with certain utility classes silently drops from compiled output | Use raw CSS values (`color: #2563eb`) instead of `@apply` for critical styles |
-| Component hardcodes `relative` + caller passes `absolute inset-0` via `className` | Both position classes land on the element; Tailwind v4 stylesheet emission order (not JSX/prop order) decides which wins, so `.relative` can beat `.absolute`, collapsing a full-bleed overlay to 0 height | Make position a component prop (e.g. `fill ? 'absolute inset-0' : 'relative'`); never stack conflicting position utilities. A 0-height lazy `<img>` never even issues a network request, which looks like a missing asset, not a layout bug. |
+| Component hardcodes `relative` + caller passes `absolute inset-0` via `className` | Both position classes land on the element; Tailwind v4 stylesheet emission order (not JSX/prop order) decides which wins, so `.relative` can beat `.absolute` and collapse a full-bleed overlay to 0 height | Make position a component prop (e.g. `fill ? 'absolute inset-0' : 'relative'`); never stack conflicting position utilities. A 0-height lazy `<img>` never issues a network request, which looks like a missing asset, not a layout bug |
 
 ## Error Detail Leak Prevention
 
-Never expose raw error messages, stack traces, internal paths, hostnames, or database connection strings in HTTP responses. This is OWASP "Improper Error Handling" and is a common finding across repos.
+Never expose raw error messages, stack traces, internal paths, hostnames, or database connection strings in HTTP responses. This is OWASP "Improper Error Handling" and it turns up repeatedly in audits.
 
 ```js
 // ❌ Leaks internal paths, DB connection strings, etc.
@@ -144,7 +144,7 @@ catch (error) {
 }
 ```
 
-**Common leak vectors:** `details: String(error)`, `error: err.message`, `os.hostname()` in health endpoints, file-upload middleware raw messages, CLI exit codes in spawn error handlers.
+**Common leak vectors:** `details: String(error)`, `error: err.message`, `os.hostname()` in health endpoints, MulterError raw messages, CLI exit codes in spawn error handlers.
 
 ## Command Injection: exec vs execFile
 
@@ -158,7 +158,7 @@ exec(`open "${url}"`);
 execFile('open', [url]);
 ```
 
-**Why:** an `openInBrowser()` helper passed user-controlled URLs through `exec()`. Fixed by switching to `execFile()` plus a URL validation guard rejecting non-http(s) protocols.
+For URLs, also add a validation guard rejecting non-http(s) protocols before the call.
 
 ## Prisma globalThis Singleton: Always Cache in Production
 
@@ -176,7 +176,7 @@ With adapters like `@prisma/adapter-libsql`, production can also load the module
 globalForPrisma.prisma = prisma;
 ```
 
-## Shell → Script Data Passing: Use Temp Files
+## Shell to Script Data Passing: Use Temp Files
 
 Never embed JSON or structured data into script strings via shell variable expansion. Quotes, newlines, and special characters in the data will corrupt the target language syntax.
 
@@ -198,7 +198,7 @@ with open(sys.argv[1]) as f:
 rm -f "$TMPFILE"
 ```
 
-**Why:** a shell wrapper silently produced malformed Python when the data it interpolated (article titles) contained special characters. Temp files eliminate all shell escaping concerns.
+**Why:** interpolated data silently produces malformed scripts (e.g. when news article titles contain special chars). Temp files eliminate all shell escaping concerns.
 
 **Also applies to:** Node.js (`--eval` with interpolated strings), Ruby, any language invoked from bash with dynamic data. Use stdin piping (`echo "$JSON" | python3 script.py`) as an alternative to temp files.
 
@@ -215,15 +215,13 @@ from zoneinfo import ZoneInfo
 eastern = ZoneInfo('America/New_York')
 ```
 
-**Why:** a market-hours check used a hardcoded EDT offset, causing zero executions during EST months. The cron schedule was also wrong, because UTC hours were interpreted as local time.
+**Why:** a market-hours check with a hardcoded daylight-time offset produces zero executions for half the year. Also check cron schedules: UTC hours interpreted as local time are a common companion bug.
 
 ## Output Truncation Causes Silent Parse Failures
 
-When bash scripts use `head -c N` or `head -n N` to limit command output before extracting structured blocks (via `grep`, `jq`, etc.), the truncation can silently drop the block downstream code depends on. The result is an empty match, not an error, so failures are invisible.
+When bash scripts use `head -c N` or `head -n N` to limit command output before extracting structured blocks (via `grep`, `jq`, etc.), the truncation can silently drop the block downstream code depends on. The result is an empty match, not an error, so failures are invisible (a truncated LLM output that drops its trailing structured block can yield empty summaries for weeks).
 
-**Example:** a `head -c 2000` limit truncated the structured marker block that downstream notification threading depended on. The script ran without errors but produced empty summaries for weeks.
-
-**Fix:** Either size the limit to the maximum expected output (e.g., `head -c 10000`), or extract the specific field first and truncate the extracted value. Never truncate structured output before parsing it.
+**Fix:** either size the limit to the maximum expected output (e.g., `head -c 10000` for LLM output), or extract the specific field first and truncate the extracted value. Never truncate structured output before parsing it.
 
 ## Structured Output Format Compliance
 
@@ -231,38 +229,51 @@ When a prompt specifies a strict output format (e.g., "ONLY valid JSON", "no mar
 
 1. **Parse the constraint first**: read the format requirement exactly.
 2. **Validate before submitting**: after writing the response, check it against the constraint.
-3. **Fix, don't annotate**: if a violation is found: STOP, regenerate correctly. Never submit both the violation and a self-diagnosis of it.
+3. **Fix, don't annotate**: if a violation is found, STOP and regenerate correctly. Never submit both the violation and a self-diagnosis of it.
 
 **Common violations:** wrapping JSON in fences when told not to; adding explanatory text when told "no explanation"; submitting a self-diagnosis inside the violating output.
 
-**Why:** hard format constraints are enforcement gates for downstream parsers. Identifying a violation is not fixing it, and a response that diagnoses its own violation still breaks the parser.
+**Why:** hard format constraints are enforcement gates for downstream parsers. An agent that notices its own violation and reports it inside the same output knew the rule and still didn't fix it. Identifying a violation is not fixing it.
 
 ## Update CLAUDE.md When Adding Features
 
-After implementing a new feature, route, export, or command, update the repo's CLAUDE.md before committing. Documentation lag is structural: close it at commit time. A drift-check hook that flags commits adding exports/routes/env vars without a CLAUDE.md update is a cheap way to enforce this.
+After implementing a new feature, route, export, or command, update the repo's CLAUDE.md before committing. Documentation lag is structural; close it at commit time.
 
-### Centralize query-param parsing; don't hand-roll guards in SSR pages
-When an API route uses a `paginate()`/`parsePageParam()` helper to validate `?page=` (guarding against `parseInt('abc')=NaN` → Prisma `skip=NaN` → 500), SSR page components that re-implement the same parsing with `Math.max(1, parseInt(String(x||'1')))` will diverge as one or the other gains new guards. Extract one shared helper used by both API routes and every SSR page; any user-controlled value flowing into Prisma `skip`/`take`/`where` must pass through it.
+## Centralize Query-Param Parsing: Don't Hand-Roll Guards in SSR Pages
+
+When an API route uses a `paginate()`/`parsePageParam()` helper to validate `?page=` (guarding against `parseInt('abc')=NaN`, then Prisma `skip=NaN`, then a 500), SSR page components that re-implement the same parsing with `Math.max(1, parseInt(String(x||'1')))` will diverge as one or the other gains new guards. Extract one shared helper used by both API routes and every SSR page; any user-controlled value flowing into Prisma `skip`/`take`/`where` must pass through it.
+
+## An Upper-Bound Clamp on a Query Param Is Not Validation
+
+`const limit = Math.min(Number(url.searchParams.get("limit") || 50), 200)` reads like validation because it caps the max, but `Number()` on anything non-numeric produces `NaN`, and nothing rejects `NaN`, negatives, or fractions before they reach the DB layer. With Prisma + `@prisma/adapter-libsql`, the failure modes are not symmetric, which makes this easy to under-test:
+
+| input | what actually happens |
+|---|---|
+| `take: NaN` / `skip: NaN` (`?limit=all`, `?offset=abc`) | `PrismaClientValidationError`, uncaught, HTTP 500 |
+| `skip: -1` | throws `Value can only be positive`, 500 |
+| `take: -2` | **no error**: negative `take` means "last N rows", so under `orderBy: desc` the caller silently gets the OLDEST page with a 200 |
+| `take: 1.5` / `skip: 1.5` | SQLite truncates silently; the response echoes the fractional value back |
+
+**Rule:** for any query-param parser feeding an ORM/DB call, reject non-numeric, negative, and fractional input with a 400 naming the bad param. Capping the max is only one axis.
 
 ## `backdrop-filter` Ancestors Confine `position:fixed` Overlays: Portal to Body
 
-Any ancestor with a non-`none` `backdrop-filter` (e.g. glass-morphism / `backdrop-blur` cards) or `transform`/`filter` creates a CSS containing block for `position:fixed` descendants. A `fixed inset-0` modal, lightbox, or toast rendered inside such a card is silently clipped to the card's bounds, not the viewport.
+Any ancestor with a non-`none` `backdrop-filter` (e.g. glass-morphism / `backdrop-blur` cards) or `transform`/`filter` creates a containing block for `position:fixed` descendants. A `fixed inset-0` modal, lightbox, or toast rendered inside such a card is silently clipped to the card's bounds, not the viewport.
 
 **Symptom:** overlay measures card dimensions instead of viewport; backdrop is unclickable or truncated.
 
-**Fix:** Use `ReactDOM.createPortal(overlay, document.body)` to render fixed overlays outside the containing ancestor.
+**Fix:** use `ReactDOM.createPortal(overlay, document.body)` to render fixed overlays outside the containing ancestor.
 
 **Two follow-on gotchas after portaling:**
-1. Portals still bubble synthetic events through the React tree, so clicks inside the overlay can still fire ancestor `onClick` handlers (e.g. a card's `navigate`). Add `e.stopPropagation()` on overlay and close-button handlers.
-2. `aria-modal=true` does NOT trap keyboard focus; implement an explicit Tab/Shift+Tab focus trap and reclaim focus if `document.activeElement` leaves the dialog.
+1. Portals still bubble synthetic events through the React tree: clicks inside the overlay can still fire ancestor `onClick` handlers (e.g. a card's `navigate`). Add `e.stopPropagation()` on overlay and close-button handlers.
+2. `aria-modal=true` does NOT trap keyboard focus. Implement an explicit Tab/Shift+Tab focus trap and reclaim focus if `document.activeElement` leaves the dialog.
 
-**Where to look:** Any `fixed` or `fixed inset-0` element inside a component that uses `backdrop-blur-*`, `blur-*`, `filter`, or CSS `transform`. Applies across every repo sharing a glass-morphism card design system.
+**Where to look:** any `fixed` or `fixed inset-0` element inside a component that uses `backdrop-blur-*`, `blur-*`, `filter`, or CSS `transform`.
 
 ## JS Truthiness Guards Don't Reject Negatives: Use `<= 0` for Non-Negative External Quantities
 
-When validating a physical or non-negative numeric value parsed from external input (webhook payloads, API responses, user data), `!x || x === 0` does NOT reject negative values, because JavaScript treats negative numbers as truthy. A negative distance, duration, speed, price, or count flows through arithmetic and produces an invalid result.
+When validating a non-negative numeric value parsed from external input (webhook payloads, API responses, user data), `!x || x === 0` does NOT reject negatives; JavaScript treats negative numbers as truthy. A negative distance, duration, speed, price, or count flows through arithmetic and produces an invalid result.
 
-**Fix:** Use `<= 0` for any quantity that must be strictly positive:
 ```js
 // BAD: lets negative durationSec through
 if (!distanceM || !durationSec || distanceM === 0) return undefined;
@@ -271,190 +282,203 @@ if (!distanceM || !durationSec || distanceM === 0) return undefined;
 if (!distanceM || !durationSec || distanceM <= 0 || durationSec <= 0) return undefined;
 ```
 
-**Self-review trigger:** Any guard on an externally-sourced numeric that represents a measured, non-negative quantity; ask "does `!x || x === 0` let negatives through?" If yes, change to `<= 0`.
+**Self-review trigger:** any guard on an externally-sourced numeric that represents a measured, non-negative quantity: ask "does `!x || x === 0` let negatives through?" If yes, change to `<= 0`. Also compare sibling adapters: if one uses `<= 0` and another uses `=== 0`, the outlier is the bug.
 
-**Real case:** a `computePace(distance, duration)` helper guarded only `distance === 0`, so `computePace(8000, -100)` returned −12.5 (an invalid negative pace) which propagated into an average. The sibling adapter in the same codebase already used `speed <= 0` correctly; the two were inconsistent.
+## Isolate Per-Item Failures in Batch Loops
 
-### Isolate per-item failures in batch loops; guard operations that throw on stored/external data
-When a loop processes a batch (DB rows, files, API records) and each iteration does an operation that can throw on bad data, an unguarded throw aborts the ENTIRE batch, not just the bad item. Two-layer defense: (1) guard the throwing operation itself (e.g. compile a stored regex via a `safeCompile()` that returns null on SyntaxError; `JSON.parse` external files in try/catch; check divisor != 0 before dividing on externally-sourced deltas), and (2) wrap each loop iteration in try/catch + continue so one bad record is skipped, not fatal.
+When a loop processes a batch (DB rows, files, API records) and each iteration does an operation that can throw on bad data, an unguarded throw aborts the ENTIRE batch, not just the bad item. Two-layer defense:
 
-Real case: a personal-finance app's benefit auto-detection compiled `new RegExp(template.merchantPattern)` from stored template strings at 3 sites with no guard, inside a function that looped mappings with no try/catch. One malformed pattern threw SyntaxError and 500'd the endpoint, killing detection for ALL of the user's records. Same shape seen elsewhere: `JSON.parse` on index/metadata files without try/catch; waypoint interpolation `alpha=(t-t0)/(t1-t0)` with no guard for duplicate timestamps.
+1. Guard the throwing operation itself: compile a stored regex via a `safeCompile()` that returns null on SyntaxError; `JSON.parse` external files in try/catch; check the divisor is non-zero before dividing by data-derived deltas (e.g. duplicate timestamps in an interpolation).
+2. Wrap each loop iteration in try/catch + continue so one bad record is skipped, not fatal.
 
-Self-review trigger: any `new RegExp(non-literal)`, `JSON.parse(file/network)`, or division by a data-derived value inside a loop → ask "does one bad input abort the whole batch?". Bonus: compile invariant regexes once before the loop, not per-iteration.
+A single malformed stored regex pattern compiled with `new RegExp(stored)` inside an unguarded loop can 500 an endpoint and kill processing for every record the user has.
 
-### A per-field guard doesn't make the whole record safe
-A collector that validates ONE field of each upstream record (e.g. a dedup key) reads downstream like "records are now clean," but it only guarantees THAT field. Every other field is still passed through verbatim from the untrusted source, and any consumer that dereferences a *different* field must guard it at its own boundary; the collector's key-validation is not a whole-record validation.
+**Self-review trigger:** any `new RegExp(non-literal)`, `JSON.parse(file/network)`, or division by a data-derived value inside a loop: ask "does one bad input abort the whole batch?" Bonus: compile invariant regexes once before the loop, not per iteration.
 
-Real case: a fetch/merge function validated `game.title` because title was its dedup key. A separate filter then did `g.platforms.toLowerCase()` unguarded, called directly from `main()` outside any try/catch. A record with a missing/non-string `platforms` threw → `main().catch → process.exit(1)`, killing the whole run after the discovery phase had already posted notifications. The title guard from a sibling fix did NOT protect this, because it never validated `platforms`. Fix: require `typeof g?.platforms === "string"` so a malformed record is treated as no-match and skipped; output byte-identical for well-formed records.
+## A Per-Field Guard Doesn't Make the Whole Record Safe
 
-Self-review trigger: whenever you see a collector/mapper guard or validate one key field, do NOT infer the record is safe to consume elsewhere; enumerate which OTHER fields downstream code dereferences and guard each at its own dereference site. A dereference inside a function called directly from `main()` or a top-level orchestrator with no surrounding try/catch is a whole-run crash, not a locally-contained error.
+A collector that validates ONE field of each upstream record (e.g. a dedup key) reads downstream like "records are now clean," but it only guarantees THAT field. Every other field is still passed through verbatim from the untrusted source, and any consumer that dereferences a different field must guard it at its own boundary.
 
-### A many-to-one resolver must dedupe before an additive accumulator consumes it
-A resolver that maps N input strings onto a catalog with exact-then-fuzzy matching is MANY-TO-ONE, but code that reads `inputs.map(resolve).filter(nonNull)` looks one-to-one. Every additive consumer downstream (a cost total, a line-item list, a coverage ratio, a score normalised on the total) then counts the same resolved item once per input string that mapped to it.
+Typical failure: the merge step validates `title` (its dedup key), then a filter does `g.platforms.toLowerCase()` unguarded, called directly from `main()` outside any try/catch. One record with a missing `platforms` throws, `main().catch` calls `process.exit(1)`, and the whole run dies after earlier side effects already happened. Fix: require `typeof g?.platforms === "string"` so a malformed record is treated as no-match and skipped.
 
-Real case: a `matchItems()` mapped each shopping-list name to a catalog item (exact match, then fuzzy substring either direction) with no dedup. The catalog carried verbose product names, so short list entries routinely collapsed onto the same product: `"chicken"` and `"chicken breast"` both resolved to `"Chicken Breast, Boneless Skinless"`. The plan builder priced every entry it was handed, so that product was added to `totalCost` twice ($14.48 basket reported $24.47), listed twice in the plan, and, because scoring normalises on `totalCost`, the inflated plan ranked *below* a genuinely worse one. A sibling AI-assisted path in the same codebase already deduped by `id`; only the deterministic path lacked the guard, the classic "fix reached one path not its sibling" shape.
+**Self-review trigger:** whenever a collector/mapper validates one key field, enumerate which OTHER fields downstream code dereferences and guard each at its own dereference site. A dereference inside a function called directly from a top-level orchestrator with no surrounding try/catch is a whole-run crash, not a contained error.
 
-Fix: dedupe AT THE RESOLVER (key on `id`, or object identity when the catalog lookup returns the same reference for repeated hits), keeping first-occurrence order, not in each caller.
+## A Many-to-One Resolver Must Dedupe Before an Additive Accumulator Consumes It
 
-Self-review trigger: whenever a matcher/resolver can return the same target object for different input strings, check every downstream consumer that sums, counts, or lists its output for an implicit one-to-one assumption. When a codebase has two paths producing the same kind of list (a deterministic path and an AI/fallback path), diff their post-processing: a dedup guard present on one and absent on the other is a bug, not a style difference. Discriminating test: two distinct inputs that both resolve to the SAME catalog row (expect the accumulator to count it once) PLUS two inputs that share a fuzzy prefix but resolve to DIFFERENT rows (expect both to survive, guarding against over-deduping).
+A resolver that maps N input strings onto a catalog with exact-then-fuzzy matching is MANY-TO-ONE, but `inputs.map(resolve).filter(nonNull)` looks one-to-one. Every additive consumer downstream (a cost total, a line-item list, a coverage ratio, a score normalised on the total) then counts the same resolved item once per input string that mapped to it. E.g. `"chicken"` and `"chicken breast"` both fuzzy-match one verbose catalog product, it is priced twice, and ranking normalised on the inflated total prefers a genuinely worse plan.
 
-### Mixed || / ?: precedence silently drops data
-`a || b ? c : d` parses as `(a || b) ? c : d`, NOT `a || (b ? c : d)`. In an object-literal value this bites when the taken branch can yield null/undefined and a downstream schema/consumer rejects it.
+**Fix:** dedupe AT THE RESOLVER (key on `id`, or object identity when the catalog returns the same reference), keeping first-occurrence order, not in each caller.
 
-Real case: `salary: salary || data.salaryRange ? formatSalaryRange(data.salaryRange) : undefined` evaluated `formatSalaryRange(undefined)` → null whenever a text-extracted salary existed but the structured range didn't, so schema validation (salary is `z.string().optional()`, rejects null) threw and the record was silently dropped (a `catch → null → filter` chain).
+**Self-review trigger:** whenever a matcher can return the same target for different inputs, check every downstream consumer that sums, counts, or lists its output. When a codebase has two paths producing the same kind of list (a deterministic path and an AI/fallback path), diff their post-processing: a dedup guard present on one and absent on the other is a bug, not a style difference. Discriminating test: two distinct inputs resolving to the SAME row (expect it counted once) PLUS two inputs sharing a fuzzy prefix but resolving to DIFFERENT rows (expect both to survive, guarding against over-deduping).
 
-Reviewer checklist: (1) any `x || y ? ... : ...` or `x && y ? ... : ...` in a value position is suspect, so add parens or split it; (2) enable eslint `no-mixed-operators` and `no-unneeded-ternary` (a default config will not flag this); (3) a sibling correct form nearby is a strong tell (the parallel adapter used `salary || undefined`; the broken one was the outlier). Fix pattern: `salary || formatSalaryRange(range) || undefined`, coalescing to undefined so the field is never null.
+## Mixed `||` / `?:` Precedence Silently Drops Data
 
-### Check for sibling deliverables before revising a doc another session may have deepened
-Before extending a deliverable, list the sibling files in its directory and follow every internal link in it. A parallel session may have produced deeper research that CONTRADICTS the doc you are about to extend, and the doc may already carry a superseded-by pointer.
+`a || b ? c : d` parses as `(a || b) ? c : d`, NOT `a || (b ? c : d)`. In an object-literal value this bites when the taken branch can yield null/undefined and a downstream schema rejects it:
 
-Real case: extending a prep guide with an itinerary, the guide linked a companion briefing that carried a bold "Partly superseded" banner pointing at a third doc built from full source transcripts. That third doc reversed a core recommendation, making the guide's suggested opening question actively wrong. Extending without reading siblings would have shipped a confidently-wrong claim into a same-day deliverable.
+```js
+// Bug: when salary exists but range doesn't, evaluates formatSalaryRange(undefined) -> null
+salary: salary || data.salaryRange ? formatSalaryRange(data.salaryRange) : undefined
+// Fix: coalesce so the field is never null
+salary: salary || formatSalaryRange(data.salaryRange) || undefined
+```
+
+If the schema is `z.string().optional()` (rejects null) and a catch maps parse failures to null then filters them, the record silently disappears.
+
+**Checklist:** (1) any `x || y ? ... : ...` or `x && y ? ... : ...` in a value position is suspect: add parens or split it; (2) enable eslint `no-mixed-operators` and `no-unneeded-ternary`; (3) a sibling correct form nearby (e.g. `salary || undefined` in a parallel adapter) is a strong tell.
+
+## Check for Sibling Deliverables Before Revising a Doc Another Session May Have Deepened
+
+Before extending a deliverable, list the sibling files in its directory and follow every internal link in it. A parallel session may have produced deeper research that CONTRADICTS the doc you are about to extend, and the doc may already carry a superseded-by pointer. Extending without reading siblings can ship a confidently-wrong recommendation that a newer doc already reversed.
 
 Procedure before editing any deliverable:
+
 ```bash
 ls <dir>                                   # siblings the doc may not link
-grep -oE '\]\(\./[^)]+\)' <doc>            # every internal link
+grep -oE '\]\(\./[^)]+\)' <doc>           # every internal link
 grep -inE 'supersede|correction|stale|outdated|use .* instead' <doc> <siblings>
 ```
 
 Then verify each link resolves, since a superseded-by pointer to a missing file is worse than none:
+
 ```bash
 for f in $(grep -oE '\]\(\./[^)]+\)' doc.md | sed 's/](\.\///; s/)$//'); do [ -e "$f" ] && echo "OK $f" || echo "MISSING $f"; done
 ```
 
-### Substring-matching short blocklist tokens silently drops legitimate content
-A keyword blocklist matched with a bare substring test (`any(w in text for w in WORDS)`, `text.includes(w)`, `LIKE '%w%'`) is wrong the moment ANY entry is short enough to sit inside an ordinary word. The short entry silently matches unrelated text, and if the match feeds a HARD FILTER the affected item is not down-ranked, it DISAPPEARS.
+## Substring-Matching Short Blocklist Tokens Silently Drops Legitimate Content
 
-Real case: a profanity list contained "ass", matched via `any(p in all_text for p in WORDS)`. Every window containing pass/class/assist/massive/password/grass/assassin/embarrassing/compass/classic was flagged; because the scorer returns 0 when a flagged window scores under a threshold, clean clips were dropped from candidate selection entirely. 12/12 sampled innocent phrases false-positived.
+A keyword blocklist matched with a bare substring test (`any(w in text for w in WORDS)`, `text.includes(w)`, `LIKE '%w%'`) is wrong the moment ANY entry is short enough to sit inside an ordinary word. `"ass"` matches pass, class, assist, massive, password, grass, compass, classic. If the match feeds a HARD FILTER, the affected item is not down-ranked, it DISAPPEARS, with no log line.
 
-Do NOT "fix" this by wrapping every entry in `\b`. That trades false positives for false NEGATIVES: `\bfuck\b` stops matching "fucking", `\bshit\b` stops matching "shitty". And prefix-anchoring (`\bass\w*`) reintroduces the original bug ("assist", "assassin"). No single uniform rule is correct, because the list mixes long unambiguous tokens with short dangerous ones.
+Do NOT "fix" this by wrapping every entry in `\b`. That trades false positives for false NEGATIVES: `\bfuck\b` stops matching "fucking", `\bshit\b` stops matching "shitty". Prefix-anchoring (`\bass\w*`) reintroduces the original bug ("assist").
 
-Correct shape: keep substring matching as the DEFAULT (it catches inflections for free), and maintain an explicit whole-word exception set for the short entries, then enumerate the compound forms in the main list:
+Correct shape: keep substring matching as the DEFAULT (it catches inflections for free), maintain an explicit whole-word exception set for the short entries, and enumerate compound forms in the main list:
+
 ```python
-WHOLE_WORD = {"ass", "asses"}                      # \b-anchored
-WORDS = [..., "asshole", "dumbass", "badass"]      # substring, unambiguous
+WHOLE_WORD = {"ass", "asses"}          # \b-anchored
+WORDS = [..., "asshole", "dumbass", "badass"]  # substring, unambiguous
 parts = [rf'\b{re.escape(w)}\b' if w in WHOLE_WORD else re.escape(w) for w in WORDS]
 PATTERN = re.compile('|'.join(parts))
 ```
 
-Reviewer checklist: (1) for every blocklist/keyword filter, ask "is any entry <= 4 chars, and is it a substring of a common word?" and grep the entry against a word list; (2) trace whether a match causes a hard drop (return 0 / continue / filter out) rather than a score adjustment, since hard drops make the bug invisible: the dropped item leaves no log line; (3) when you add `\b` anchors, ALWAYS re-test the inflections the old substring form used to catch, in BOTH directions (innocent-must-be-clean AND profane-must-still-match), because a one-directional test suite will happily certify a recall regression; (4) verify escape/anchor interaction for non-alphabetic entries (censor markers like `***` or `[__]`), since `\b` does not apply where there are no word characters at the edges.
+**Reviewer checklist:**
+1. For every blocklist/keyword filter, ask "is any entry <= 4 chars, and is it a substring of a common word?" Grep the entry against a word list.
+2. Trace whether a match causes a hard drop (return 0 / continue / filter out) rather than a score adjustment. Hard drops make the bug invisible.
+3. When you add `\b` anchors, re-test the inflections the old substring form caught, in BOTH directions (innocent-must-be-clean AND bad-must-still-match). A one-directional suite will certify a recall regression green.
+4. Verify escape/anchor interaction for non-alphabetic entries (censor markers like `***` or `[__]`): `\b` does not apply where there are no word characters at the edges.
 
-The compound list is an OPEN CLASS and any enumeration of it is incomplete by construction. Budget for that: document it as incomplete, and do NOT claim "so nothing is lost". In the run that produced this entry the first attempt shipped exactly that claim with a three-item allowlist {asshole, dumbass, badass}; an independent verifier then diffed old-matcher vs new-matcher over 131 strings and found 22 recall losses (jackass, smartass, asswipe, half-assed, fatass, kickass, ...). Because the match fed a hard gate, the losses did not merely mislabel: low-energy windows that used to be gated to 0 now scored ~7.4 and became SELECTABLE. Trading a false-positive bug for a false-negative bug of the same size is not a fix.
+The compound list is an OPEN CLASS and any enumeration is incomplete by construction. Document it as incomplete and do NOT claim "so nothing is lost"; a short allowlist of compounds will miss many (jackass, smartass, half-assed, kickass...), and when the match feeds a hard gate, each miss makes a previously-gated item selectable. Trading a false-positive bug for a false-negative bug of the same size is not a fix.
 
-Two process lessons, both cheap:
-- Write the recall test in the SAME commit as the anchor change, enumerating the strings the old form caught. A one-directional test suite (innocent-must-be-clean only) will happily certify the regression green.
-- For any matching change, mechanically diff old vs new over a few hundred strings drawn from BOTH classes, rather than reasoning about which cases changed. The 22 losses were invisible to inspection and obvious to a diff.
+Two cheap process rules:
+- Write the recall test in the SAME commit as the anchor change, enumerating the strings the old form caught.
+- For any matching change, mechanically diff old vs new matcher output over a few hundred strings drawn from BOTH classes, rather than reasoning about which cases changed. Losses invisible to inspection are obvious to a diff.
 
-### Enumerate every caller before claiming a configured limit is unreachable or dead config
-When you find that an interface cannot command some configured limit (a max, a cap, a timeout), the FIX is usually right, but the JUSTIFICATION "this parameter is dead, it can never bind" is a far stronger claim than the evidence normally supports. It holds only if every caller of the underlying model goes through the interface you happened to be looking at.
+## Enumerate Every Caller Before Claiming a Configured Limit Is Unreachable or Dead Config
 
-Check it: grep for the parameter name AND for the model's entry point, then read each caller. A second path often reaches the limit already, typically an internal, scripted or replay path that passes RAW physical units while the public path passes normalized values. Scope the claim to the interface you actually verified ("unreachable through the public/normalized interface") rather than to the parameter.
+When you find that an interface cannot command some configured limit (a max, a cap, a timeout), the FIX is usually right, but the justification "this parameter is dead, it can never bind" is a far stronger claim than the evidence normally supports. It holds only if every caller of the underlying model goes through the interface you looked at.
 
-Real case: in an RL environment, the normalized action space scaled a symmetric [-1,1] action by the acceleration limit on both signs, so the separately-modeled (larger) braking limit was unreachable for the agent-controlled entity. The commit message claimed the brake limit "could never bind"; a verifier found scripted non-agent entities reach the same kinematic model through a different, unnormalized code path and clamp against that limit several times per episode. The defect was real, the sweeping claim was not. A reviewer who knows about the other caller reads the overreach as evidence you did not look.
+Check it: grep for the parameter name AND for the model's entry point, then read each caller. A second path often reaches the limit already, typically an internal, scripted, or replay path that passes RAW physical units while the public path passes normalized values. Scope the claim to what you verified ("unreachable through the normalized interface"), not to the parameter. A reviewer who knows about the other caller reads the overreach as evidence you did not look.
 
-Related numpy/array corollary: collapsing an elementwise expression to a Python scalar (`float(x)`, `int(x)`, `.item()`) purely to make a branch read nicely moves error detection UPSTREAM of the callee that validates shape, and replaces that callee's specific message with a generic conversion TypeError. Prefer a shape-agnostic elementwise form (`np.where(cond, a, b)`) so malformed input still reaches the validating callee and gets its real error.
+**numpy corollary:** collapsing an elementwise expression to a Python scalar (`float(x)`, `int(x)`, `.item()`) purely to make a branch read nicely moves error detection upstream of the callee that validates shape, and replaces that callee's specific message with a generic conversion TypeError. Prefer a shape-agnostic elementwise form (`np.where(cond, a, b)`) so malformed input still reaches the validating callee.
 
-### A control-character escape in an Edit can land as a literal byte and turn the file binary, so grep goes silent
-Writing a regex character class such as `[\x00-\x1f]` into a file via an editing tool can emit the actual control bytes rather than the escape text. The file then counts as binary: grep stops printing matches (and `grep -c` prints nothing) for every pattern in that file, which reads as "my edit did not land" rather than "the file is now binary". Two things follow. First, if grep suddenly finds nothing in a file you just edited, run `grep -a` before re-editing. Second, write control-character classes as `\u0000-\u001f` in JS source, which is plain ASCII in the file and means the same thing. Check with:
-```bash
-python3 -c "d=open(f,'rb').read(); print([(i,b) for i,b in enumerate(d) if b<9 or (10<b<32 and b!=13) or b==127][:5])"
-```
+## A Control-Character Escape in an Edit Can Land as a Literal Byte and Turn the File Binary
 
-### Adding a config passthrough makes every previously-harmless typo in that key a live value
-A loader had been silently dropping three of a physics model's tunable limits. The fix forwarded them and coerced with `float()`. An independent verifier pass found that this made ONE case strictly worse than the bug it fixed.
+Writing a regex character class such as `[\x00-\x1f]` into a file via an editing tool can emit the actual control bytes rather than the escape text. The file then counts as binary: grep stops printing matches (and `grep -c` prints nothing) for every pattern in that file, which reads as "my edit did not land" rather than "the file is now binary."
 
-PyYAML resolves yes/no/on/off to Python bools, and `float(True)` is `1.0`. So `max_accel: yes`, previously ignored (leaving a sane 4.0 default), now quietly installed a 1.0 limit. The passthrough converted a harmless typo into a live, wrong value with no error.
+- If grep suddenly finds nothing in a file you just edited, run `grep -a` before re-editing.
+- Write control-character classes as `\u0000-\u001f` in JS source: plain ASCII in the file, same meaning.
+- Check with: `python3 -c "d=open(f,'rb').read(); print([(i,b) for i,b in enumerate(d) if b<9 or (10<b<32 and b!=13) or b==127][:5])"`
 
-Rule: a passthrough and its validation must land in the SAME change. The moment a key starts being honored, every malformed value that was previously discarded becomes real. Ask specifically: what did this key do before I honored it, and is the new behavior worse for a typo?
+## Adding a Config Passthrough Makes Every Previously-Harmless Typo in That Key a Live Value
 
-Concrete checks for numeric config, all of which `float()` alone passes:
-- **bool:** reject explicitly. `isinstance(x, bool)` must be tested BEFORE `float()`, because bool is a subclass of int and `float(True) == 1.0`. In YAML this is not exotic: yes/no/on/off/true/false all resolve to bools.
-- **non-finite:** `'nan'`/`'inf'` parse fine and then propagate through arithmetic into state instead of failing. A nan limit poisoned every downstream position rather than raising.
-- **negative:** worse than useless where the value is used as a bound. `np.clip(v, -max_brake, max_accel)` with a negative `max_brake` has min > max; numpy returns the max, so a full-brake command came back as full throttle and the vehicle SPED UP (10.0 → 10.4 m/s under the strongest brake available).
+When a loader that silently dropped some keys is fixed to forward them (e.g. coercing with `float()`), every malformed value that was previously discarded becomes real. PyYAML resolves `yes/no/on/off` to Python bools, and `float(True)` is `1.0`, so `max_accel: yes` (previously ignored, leaving a sane default) now quietly installs a limit of 1.0.
 
-Note the last one is a general numpy trap, not a config trap: `np.clip` does not error when min > max, it silently returns the max. Any clip whose bounds come from user input needs the bounds checked, not just the value.
+**Rule:** a passthrough and its validation must land in the SAME change. Ask: what did this key do before I honored it, and is the new behavior worse for a typo?
 
-Coerce and validate at the boundary, with an error naming the offending field and its location. The alternative is a type error surfacing much later and far from its cause: an un-coerced string reached the model and died inside numpy as `ufunc 'clip' did not contain a loop with signature matching types ... dtype('<U2')`, which points nowhere near the config line that caused it.
+Checks for numeric config, all of which `float()` alone passes:
+- **bool:** reject explicitly. Test `isinstance(x, bool)` BEFORE `float()`, because bool is a subclass of int.
+- **non-finite:** `'nan'`/`'inf'` parse fine and then propagate through arithmetic into state instead of failing.
+- **negative:** worse than useless where the value is a bound. `np.clip(v, -max_brake, max_accel)` with a negative `max_brake` has min > max; numpy returns the max, so a full-brake command comes back as full throttle.
 
-### Re-verify an absence claim in a backlog item before implementing it; one grep of the canonical file is not proof
-Carried-forward backlog notes (feature-idea logs, TODO lists, roadmap items) frequently assert an ABSENCE: "X has no indexes", "this path is untested", "there is no validation". Absence claims are the least reliable kind of backlog item, because they are usually produced by a single grep of the file where the thing SHOULD be declared, not by searching every place it COULD be declared. Re-verify before spending a session on one.
+`np.clip` does not error when min > max; it silently returns the max. Any clip whose bounds come from user input needs the bounds checked, not just the value.
 
-Two instances from a single run:
-- "this table has no indexes beyond the PK" was false for a Drizzle + SQLite app. The ORM schema file declares no `index()`, which is what the note was based on, but the DB bootstrap module creates the single-column FK and timestamp indexes in a raw DDL string, which is also what the test-db factory executes. The indexes existed; only the COMPOSITE variants were missing.
-- "these three exported functions have zero direct test coverage" was false in a second repo the same day: the matching test file already had 11 direct tests across all three.
+Coerce and validate at the boundary, with an error naming the offending field and its location. Otherwise the type error surfaces far from its cause (e.g. an un-coerced string dying inside numpy as "ufunc 'clip' did not contain a loop with signature matching types ... dtype('<U2')").
 
-Procedure: for "no tests", grep the test dir for the symbol, don't infer from a coverage note. For "no indexes/constraints/migrations", grep for raw DDL and migration files, not just the ORM schema. For "no validation", read the route body, not the schema. If the premise turns out to be false, WRITE THE CORRECTION back into the backlog file with the `file:line` that disproves it, so the next session does not re-derive the same dead end: a stale absence claim otherwise survives indefinitely and burns one session each time it is picked up.
+## Re-Verify an Absence Claim in a Backlog Item Before Implementing It
 
-### A fix documented as a property of one file never reaches its siblings
-A behavioural fix (browser UA, unverifiable-status bucket, per-request AbortController) was made to one HTTP probe, its constants declared LOCAL to that file, and the rule written into CLAUDE.md under a heading naming that file. Three weeks later four sibling probes still had the bug, one of which silently deleted live records.
+Carried-forward backlog notes (feature-idea logs, TODO lists, roadmap items) frequently assert an ABSENCE: "X has no indexes", "this path is untested", "there is no validation". These are the least reliable backlog items because they usually come from a single grep of the file where the thing SHOULD be declared, not every place it COULD be declared. Examples: an ORM schema file declares no `index()`, but indexes are created in a raw DDL string elsewhere; a "zero test coverage" note when the test file already has direct tests.
+
+Procedure:
+- For "no tests": grep the test dir for the symbol; don't infer from a coverage note.
+- For "no indexes/constraints/migrations": grep for raw DDL and migration files, not just the ORM schema.
+- For "no validation": read the route body, not the schema.
+- If the premise is false, WRITE THE CORRECTION back into the backlog file with the `file:line` that disproves it. A stale absence claim otherwise survives indefinitely and burns one session each time it is picked up.
+
+## A Fix Documented as a Property of One File Never Reaches Its Siblings
+
+A behavioural fix (e.g. a browser User-Agent, an "unverifiable status" bucket, a per-request AbortController) made to one HTTP probe, with its constants declared LOCAL to that file and the rule documented under a heading naming that file, leaves sibling probes with the bug, and one of them may silently delete live records.
 
 Two mechanisms, both fixable at the time of the original fix:
-1. **HOIST THE CONSTANTS.** Constants living in the fixed file give the siblings nothing to import and no compile-time link. Move them to the shared module the siblings already import, and make the fixed file import them too. That is what makes the next divergence visible.
-2. **NAME THE DOC SECTION AFTER THE BEHAVIOUR, NOT THE FILE.** "Link Checker (src/link-checker.js)" is a rule nobody applies to `link-validate.js`. "Probing third-party sites (every HEAD/GET against a page we do not own)", with the covered call sites enumerated, is.
+1. **Hoist the constants.** Move them to the shared module the siblings already import, and make the fixed file import them too. That creates the link that makes the next divergence visible.
+2. **Name the doc section after the behaviour, not the file.** "Link Checker (src/link-checker.js)" is a rule nobody applies to a sibling file. "Probing third-party sites (every HEAD/GET against a page we do not own)", with covered call sites enumerated, is.
 
-Corollary worth its own grep: AN UNUSED-IMPORT LINT ERROR AT A FIX SITE IS A SIGNPOST, NOT LINT NOISE. "X is defined but never used" at the exact line a fix touched usually means that file stopped sharing something with its siblings. Here the unused import had CI red on the default branch for three weeks, starting with the fix commit itself; and reading only the LATEST failing run's date understates the outage, so page back to the first failure before quoting a start date.
+**Corollary:** an unused-import lint error at a fix site is a signpost, not noise. "X is defined but never used" at the exact line a fix touched usually means that file stopped sharing something with its siblings. When quoting how long CI has been red, page back to the first failing run; the latest failure's date understates the outage.
 
-### A display tag is not a handle: persist the user id whenever a record may later need to address that user
-A bot's persisted job record stored the requester's *display tag* and no id. The tag renders fine in the completion notice, so nothing looked wrong for months. But the post-restart recovery path needs an *addressable* id to attribute an inbound reply, and a tag cannot drive session lookup, an authorization check, or a mention. With no id in the record the code fell through to a single-user env fallback, so every recovered job's reply was attributed to that one user regardless of who asked: correct by accident on a single-user deployment, and a silent identity swap the moment there are two requesters.
+## A Display Tag Is Not a Handle: Persist the User ID Whenever a Record May Need to Address That User
 
-The general shape: a field chosen because it *displays* well silently fails the first time something needs to *act* on it, and a per-deployment fallback masks the gap for exactly as long as the deployment has one user. Two tells that a fallback is hiding a missing field rather than handling a real edge case: (1) the fallback is a single scalar configured per-deployment rather than derived per-record, and (2) the comment justifying it explains a *structural* absence ("the recovery path has no user id in its job record") instead of a rare one.
+A persisted job record that stores the requester's *display name/tag* but no id renders fine in notifications, so nothing looks wrong. But any later path that must *act* on the user (attribute a reply, run an authorization check, look up a session, mention them) cannot do it from a tag. Code then falls through to a single-user env fallback, which is correct by accident on a single-user deployment and a silent identity swap the moment there are two users.
 
-Fix: persist both. Store the id at every record-write site (every record-write site), pass it through the consumer, and keep the env fallback only for records written before the change. Cover the resolution order explicitly: recorded id beats fallback, missing id uses fallback, neither present refuses rather than guessing at an identity.
+Two tells that a fallback is hiding a missing field rather than handling a real edge case: (1) the fallback is a single per-deployment scalar rather than derived per-record, and (2) the comment justifying it explains a *structural* absence ("the recovery path has no user id") instead of a rare one.
 
-### Turning a 500 into a successful empty response makes a previously-unreachable client state reachable
-A server-side guard that converts an error into a valid empty response does not just fix a bug, it OPENS A CODE PATH the client has never executed. The client's zero-row rendering was dead code up to that moment, so it has never been exercised and may be worse than the error was.
+**Fix:** persist both, at every record-write site; pass the id through the consumer; keep the env fallback only for records written before the change. Test the resolution order explicitly: recorded id beats fallback, missing id uses fallback, neither present refuses rather than guessing an identity.
 
-Concrete case, from a React + Express feed app. A PR guarded `page[page.length - 1].review` so a filtered empty feed page returns `200 {reviews: []}` instead of a 500. Verified on the default branch:
+## Turning a 500 into a Successful Empty Response Makes a Previously-Unreachable Client State Reachable
 
-```
-GET /api/feed?userId=...&category=books  ->  500  ("Cannot read properties of undefined (reading 'review')")
-same request with the guard merged       ->  200  {"reviews":[],"suggestedReviewers":[...]}
-```
+A server-side guard that converts an error into a valid empty response OPENS A CODE PATH the client has never executed. The client's zero-row rendering was dead code until that moment and may be worse than the error was.
 
-The client's `useApi` never calls `setAllReviews` on a REJECTED fetch, so while the endpoint 500s the stale non-empty list survives and the UI looks fine. The moment the response succeeds with an empty array, the empty list lands and the page renders its zero-row branch, which unmounted the filter toolbar and showed "Follow some reviewers" to a user who already follows people. **The error-to-success fix alone converted a 500 into a UI dead end.**
+Example: a feed endpoint 500s on an empty filtered page (dereferencing `page[page.length - 1]`). The client's fetch hook never updates state on a rejected fetch, so the stale non-empty list survives and the UI looks fine. Once the guard returns `200 {items: []}`, the empty list lands and the page renders its zero-row branch, which unmounts the filter toolbar and shows onboarding copy to an established user. The error-to-success fix alone converted a 500 into a UI dead end.
 
-What to do when reviewing (or writing) a guard like this:
-- Ask what the consumer does with the newly-possible value, and go read that branch. "It returns valid JSON now" is not the end of the change.
-- Actually issue the request against both builds and diff the rendered output, not just the status code. Status 200 is not evidence the user is better off.
-- If the client fix lives in a different PR, say so in BOTH PR descriptions and ask for them to be merged together. A reviewer merging only the server half ships a regression that neither PR's diff shows.
+When reviewing or writing a guard like this:
+- Ask what the consumer does with the newly-possible value and read that branch. "It returns valid JSON now" is not the end of the change.
+- Issue the request against both builds and diff the rendered output, not just the status code.
+- If the client fix lives in a different PR, say so in BOTH PR descriptions and ask for them to merge together; merging only the server half ships a regression neither diff shows.
 
-Generalises past HTTP: an exception that was silently swallowed, a null that was short-circuited, a retry that always failed; anything whose failure masked a downstream branch.
+Generalises past HTTP: an exception that was silently swallowed, a null that was short-circuited, a retry that always failed: anything whose failure masked a downstream branch.
 
-### A narration strip must cover both ends of the artifact, not just where it starts
-A control that strips a model's own process-narration out of a generated artifact typically anchors on where the REAL content starts (e.g. "everything from the first `#` heading onward is the guide") and treats that as the whole fix. That only covers narration prepended BEFORE the content. A downstream pass that appends its own commentary AFTER the content (e.g. a refinement/editing pass writing an `## Editor Notes` section at the bottom, logging what it changed) is invisible to a front-anchored strip, because the strip never looks past the point where it decided the real content already started.
+## A Narration Strip Must Cover Both Ends of the Artifact
 
-Concrete case: an extraction routine peeled a leading monologue plus a trailing handoff sentence off the FRONT, then treated everything from the guide's first heading onward as the guide, verbatim. It never re-scanned the tail. A separate refinement pass appended `## Editor Notes` with its own QA log at the END. Result: 46% of completed guides (69 of 151) shipped the model's internal QA log as a visible, user-facing section, and as a section-rail navigation anchor, making it look intentional.
+A control that strips a model's process-narration out of a generated artifact typically anchors on where the REAL content starts ("everything from the first `#` heading onward is the document"). That only covers narration prepended BEFORE the content. A downstream pass that appends its own commentary AFTER the content (e.g. a refinement pass writing an `## Editor Notes` QA log at the bottom) is invisible to a front-anchored strip. In practice this can leak internal QA logs into a large fraction of user-facing outputs, sometimes even as a navigation anchor that makes it look intentional.
 
-When reviewing (or writing) any strip/redaction/extraction control over model-generated output:
-- Ask whether the control has an END condition as well as a START condition. A control that only answers "where does the real content begin" has no opinion about content appended after a later pass runs, and will not know to look for it.
-- Check every pass that can touch the artifact AFTER the strip's assumed boundary, not just the pass the strip was originally written against. A strip built for a one-pass pipeline silently stops being complete the moment a second pass is added downstream.
-- Measure against the full corpus, not a hand-picked sample: the defect here was invisible in most reads because whether the notes rendered depended on which run generated the guide, not on anything visible in the leaking guide itself.
+When reviewing or writing any strip/redaction/extraction control over model-generated output:
+- Ask whether the control has an END condition as well as a START condition.
+- Check every pass that can touch the artifact AFTER the strip's assumed boundary, not just the pass the strip was written against. A strip built for a one-pass pipeline stops being complete the moment a second pass is added downstream.
+- Measure against the full corpus, not a hand-picked sample; whether the leak appears may depend on which run generated the artifact.
 
-### A hardening sweep keyed on a construct's presence is blind to the site that lacks it entirely
-When hardening a class of code by grepping for the symptom construct itself (every `LIMIT` clause, every `ORDER BY`, every try/catch, every auth check), the sweep can only find sites that ALREADY have the construct. The strictly-worse site that lacks it entirely never matches that grep and stays invisible.
+## A Hardening Sweep Keyed on a Construct's Presence Is Blind to the Site That Lacks It Entirely
 
-Concrete case: a prior pass audited every truncating list and gave each a `(createdAt, id)` total order, but a search endpoint's query had no `LIMIT` and no `ORDER BY` at all, so it never appeared in the "find the LIMIT/ORDER BY clauses" sweep and stayed unbounded and nondeterministic. A follow-up pass caught it separately by enumerating list-returning endpoints instead of grepping for the guard, and added an explicit order-by plus a cap.
+When hardening a class of code by grepping for the construct itself (every `LIMIT`, every `ORDER BY`, every try/catch, every auth check), the sweep only finds sites that ALREADY have the construct. The strictly-worse site that lacks it entirely (e.g. a search query with no `LIMIT` and no `ORDER BY` at all, unbounded and nondeterministic) never matches and stays invisible.
 
-Rule: enumerate the operations that SHOULD carry the guard (every list-returning endpoint, every user-input boundary), not the ones a grep for the guard already turns up. The absence case is the one most likely to be the actual bug, and it is exactly the one a presence-keyed sweep is structurally unable to find. Same family as "Enumerate every caller before claiming a configured limit is unreachable or dead config" above: both are about scoping a sweep to what generalizes rather than to what a first grep happens to surface.
+**Rule:** enumerate the operations that SHOULD carry the guard (every list-returning endpoint, every user-input boundary), not the ones a grep for the guard turns up. The absence case is the one most likely to be the actual bug.
 
-### A clipboard write after an awaited call trips ClickFix-style blockers
-uBlock Origin's ClickFix protection (default badware list) hooks `navigator.clipboard.writeText()` and blocks a write that lands outside a fresh user gesture. An `await` before the write (`await fetch(...)`, `await somePromise`) consumes the transient user activation, so the write no longer qualifies as gesture-bound even though it is inside the same click handler. Observed on a set of share buttons: the share POST created the URL successfully, but the auto-copy of that URL was blocked with no user-visible error.
+## A Clipboard Write After an Awaited Call Trips uBlock Origin's ClickFix Blocker
+
+uBlock Origin's ClickFix protection (default badware list) hooks `navigator.clipboard.writeText()` and blocks writes outside a fresh user gesture. An `await` before the write (`await fetch(...)`, `await somePromise`) consumes the transient user activation, so the write no longer qualifies even inside the same click handler. Symptom: a share button creates the URL successfully but the auto-copy is silently blocked.
 
 **Rule:** never auto-copy to clipboard after an `await` inside the same handler. Split into two steps:
 1. One action creates the link (the async fetch), with no clipboard write.
-2. A dedicated **Copy link** button writes with `writeText` called synchronously inside its own click handler, with the URL already in component state, and no `await` before the write.
+2. A dedicated **Copy link** button calls `writeText` synchronously inside its own click handler, with the URL already in state and no preceding `await`.
 
-Keep a visible, selectable `<a>` as a fallback. The heuristic is about gesture-binding, not content: a plain `https://` URL still trips it if the write is gesture-unbound. A synchronous `writeText` in an uninterrupted click handler (no preceding `await`) is not affected.
+Keep a visible, selectable `<a>` as a fallback. The heuristic is about gesture-binding, not content: a plain `https://` URL still trips it if the write is gesture-unbound.
 
-### A range-to-single-label formatter must compare the enclosing unit, not just the sub-unit
-A date-range formatter that special-cases a "single month" window by collapsing it to "Mon YYYY" tested only `periodStart.getMonth() === periodEnd.getMonth()`. That fires for ANY window whose endpoints fall in the same calendar month, including a 12-month membership-year period (Jun 15 2025 → Jun 14 2026), which then rendered as the single wrong label "Jun 2026": it implies a one-month window and shows the end year, hiding that the period began in 2025. Live on cards and reminder emails.
+## A Range-to-Single-Label Formatter Must Compare the Enclosing Unit, Not Just the Sub-Unit
 
-Fix: require the enclosing unit to match too (`&& getFullYear() === getFullYear()`) before collapsing; otherwise fall through to the range format.
+A date-range formatter that collapses a "single month" window to "Mon YYYY" by testing only `periodStart.getMonth() === periodEnd.getMonth()` fires for ANY window whose endpoints share a calendar month, including a 12-month anniversary-based period (Jun 15 2025 to Jun 14 2026), which then renders as "Jun 2026": implying one month and hiding that it began the prior year.
 
-General shape: a "single-unit" shortcut that keys on a sub-unit equality (month, day-of-week, hour) is wrong whenever the enclosing unit (year, week, day) differs across the range's endpoints, because a full-period window can share the sub-unit at both ends. When reviewing or writing any range formatter, list the period kinds that actually reach it (calendar year / monthly / quarterly / semi-annual / membership year) and hand-check the label for each, especially the ones whose length equals the sub-unit's cycle (a 12-month period starting mid-month lands start and end in the same month). A discriminating test constructs exactly that endpoints-share-the-sub-unit case and asserts the range form, not the collapsed form.
+**Fix:** require the enclosing unit to match too (`&& getFullYear() === getFullYear()`) before collapsing; otherwise fall through to the range format.
 
-### A unit-decomposition formatter must round the total before splitting, not round each sub-unit remainder in isolation
-A duration/quantity formatter that computes each displayed unit independently and rounds only the sub-unit remainder can produce a malformed carry:
+**General shape:** a "single-unit" shortcut keyed on sub-unit equality (month, day-of-week, hour) is wrong whenever the enclosing unit (year, week, day) differs across the endpoints. When reviewing any range formatter, list every period kind that actually reaches it (calendar year, monthly, quarterly, semi-annual, anniversary year) and hand-check the label for each, especially those whose length equals the sub-unit's cycle. A discriminating test constructs exactly that endpoints-share-the-sub-unit case and asserts the range form.
+
+## A Unit-Decomposition Formatter Must Round the Total Before Splitting
+
+A duration/quantity formatter that rounds only a sub-unit remainder can produce a malformed carry:
 
 ```ts
 const hours = Math.floor(minutes / 60);
@@ -462,41 +486,46 @@ const mins  = Math.round(minutes % 60);   // rounds the remainder in isolation
 return `${hours}h ${mins}m`;              // -> "1h 60m" for 119.7
 ```
 
-`minutes` is a raw computed float (never pre-rounded upstream), so any value whose fractional remainder rounds up to a full 60 (`minutes ∈ [k·60+59.5, (k+1)·60)` for `k ≥ 1`) renders the malformed `"1h 60m"` instead of `"2h 0m"`. Reachable in normal operation, not corrupt input: a 3-stop route totalling ≈29.9 mi produced `totalTime = 119.7`. Fix: round the total first, then split into hours/minutes; this also promotes a sub-hour value that rounds up to 60 (e.g. `59.7`) into `"1h 0m"` instead of the odd `"60 min"`.
+When `minutes` is a raw computed float, any value in `[k*60+59.5, (k+1)*60)` renders `"1h 60m"` instead of `"2h 0m"`. This is reachable in ordinary use, not just constructed edge cases.
 
-Sibling to the range-to-single-label formatter bug immediately above: both are "decompose into units, then special-case one of them" bugs where the special case is validated against the sub-unit in isolation instead of the composed whole. When reviewing or writing any formatter that splits a single continuous quantity (minutes, seconds, bytes) into multiple displayed units, round the total once at the top and derive every displayed unit from the rounded total; never round a sub-unit's remainder independently, since floating-point inputs make the boundary case (`x.5` rounding a remainder up to a full unit) reachable in ordinary use, not just as an edge case someone has to construct.
+**Fix:** round the total once at the top, then derive every displayed unit from the rounded total. This also promotes a sub-hour value that rounds up to 60 (e.g. `59.7`) into `"1h 0m"` instead of `"60 min"`. Same family as the range formatter above: a special case validated against the sub-unit in isolation instead of the composed whole.
 
-### Validate a nullable field at the source before interpolating it into a string; a stringified null survives a downstream emptiness guard
-A value can pass an emptiness/validity guard as a STRINGIFIED form of the very thing the guard was meant to reject. A fetcher built an upcoming-offer title as `` `[UPCOMING] ${el.title}` ``; when `el.title` is null the template literal yields the literal non-empty string `"[UPCOMING] null"`, which then SURVIVES the downstream merge/dedup guard, a guard that was correct for a raw null (`typeof === "string" ? title : ""`, then a non-empty-key check) but is blind to a null that upstream interpolation already turned into text (the key becomes `"null"`, non-empty). The result was not a crash but a silent data-hygiene defect: a broken notification embed titled `"[UPCOMING] null"` got posted. Distinct sibling of the current-offer path (`title: el.title`) where a RAW null IS caught by the same guard.
+## Validate a Nullable Field at the Source Before Interpolating It into a String
 
-Rule: validate or skip a nullable field at the SOURCE mapper, before it is embedded into a larger string; a guard placed after interpolation cannot distinguish a real value from a stringified null/undefined/number. When two code paths build the same field and one wraps it in a prefix/template, they need the SAME source-level validation, not just the shared downstream guard. Discriminating test input: a non-string-but-stringifies-to-nonempty value (`null`→`"null"`, `undefined`→`"undefined"`, `0`→`"0"`); a whitespace/empty string is NOT discriminating, because it collapses to an empty key. Self-review trigger: any `${x}` / `String(x)` / template literal that embeds an externally-sourced nullable field, followed anywhere downstream by a non-empty/truthiness check on the resulting string.
+A value can pass an emptiness guard as a STRINGIFIED form of the very thing the guard rejects. `` `[UPCOMING] ${el.title}` `` with `el.title === null` yields the non-empty string `"[UPCOMING] null"`, which survives a downstream guard that correctly rejects a raw null. The result is not a crash but a silent data-hygiene defect (e.g. a notification titled "[UPCOMING] null"), while a sibling path that passes the raw null IS caught by the same guard.
 
-### An upper-bound clamp on a query param is not validation; check every other axis a value can be wrong on
-`const limit = Math.min(Number(url.searchParams.get("limit") || 50), 200)` reads like input validation because it caps one thing (the max), but `Number()` on anything non-numeric produces `NaN`, and nothing here rejects `NaN`, negative numbers, or fractions before they reach the database layer. On Prisma + a SQLite adapter, the failure modes for an unvalidated `take`/`skip` are NOT symmetric, which is what makes this easy to under-test:
+**Rule:** validate or skip a nullable field at the SOURCE mapper, before embedding it in a larger string. A guard placed after interpolation cannot distinguish a real value from a stringified null/undefined/number. When two paths build the same field and one wraps it in a template, both need the same source-level validation.
 
-| input | what actually happens |
-|---|---|
-| `take: NaN` / `skip: NaN` (`?limit=all`, `?offset=abc`) | `PrismaClientValidationError` → uncaught → HTTP 500 |
-| `skip: -1` | throws `Invalid value for skip argument: Value can only be positive` → 500 |
-| `take: -2` | **no error at all**: negative `take` means "last N rows", so under `orderBy: desc` the caller silently gets the OLDEST page instead of the newest, with a 200 and no signal anything is wrong |
-| `take: 1.5` / `skip: 1.5` | SQLite truncates silently; the JSON response echoes back the fractional value the caller sent |
+**Discriminating test input:** a non-string value that stringifies to non-empty (null -> "null", undefined -> "undefined", 0 -> "0"). Whitespace or empty strings are NOT discriminating.
 
-The `take: -N` case is the dangerous one precisely because it doesn't error: a caller who fat-fingers a negative offset/limit gets a plausible-looking but wrong page of data, not a loud failure. Rule: when reviewing or writing a query-param parser that feeds an ORM/DB call, don't stop at "is the max capped"; check that the value is also rejected (with a 400 naming the bad param, not a raw pass-through) for non-numeric, negative, and fractional input before it reaches the query layer. Same family as the "JS truthiness guards don't reject negatives" entry above, but distinct: this is about an upper-bound clamp specifically reading as if it were full validation when it only constrains one direction.
+**Self-review trigger:** any `${x}` / `String(x)` / template literal embedding an externally-sourced nullable field, followed anywhere downstream by a non-empty/truthiness check on the result.
 
-### After deleting a function, grep for its callers; a 0-definition/N-call state passes `node --check` but throws ReferenceError at runtime
-When removing a JS function, grep for its CALLERS, not just its definition. A state with 0 definitions but N remaining calls passes `node --check` (syntax is valid) and the page still loads, but the handlers throw ReferenceError when invoked, silently breaking those code paths.
+## After Deleting a Function, Grep for Its Callers
 
-Real case: a concurrent session committed a partial refactor deleting two update functions but leaving 3 calls in the init/load/connect handlers. Verify UI prototypes with a real headless browser run (playwright, capturing `pageerror` + `console.error`) before claiming done; `node --check` is necessary but not sufficient. On a shared checkout, build the fix from the current working tree and remove BOTH defs and calls so your commit supersedes an incomplete sibling commit; deploy a single file with targeted rsync (no `--delete`), `git add` only that path, then diff the deployed file against committed HEAD to catch concurrent-rsync drift.
+When removing a JS function, grep for its CALLERS, not just its definition. A state with 0 definitions but N remaining calls passes `node --check` (syntax is valid) and the page still loads, but the handlers throw ReferenceError when invoked, silently breaking those code paths. This is especially likely when a concurrent session commits a partial refactor.
 
-### A threshold that moves with the input cannot be equality-compared against a counter that outlives it
-A "notify once when a counter crosses a limit" check written with `===` instead of `>=`/`<=` breaks silently whenever the limit is not a fixed constant.
+- Verify UI changes with a real headless browser run (e.g. Playwright capturing `pageerror` + `console.error`) before claiming done. `node --check` is necessary but not sufficient.
+- On a shared checkout, build the fix from the current working tree and remove BOTH defs and calls so your commit supersedes an incomplete sibling commit.
+- Deploy a single file with a targeted `rsync` (no `--delete`), `git add` only that path, then diff the deployed file against committed HEAD to catch concurrent-deploy drift.
 
-Real case: a monitoring runner alerted on `consecutive_failures === alertThreshold(error)`. The counter belongs to the whole failure STREAK and climbs monotonically, but the threshold belongs to the LATEST error and changes if the streak changes error class partway through (a transient network fault alerts at 4, a page-level fault at 2). The two sides are not guaranteed to ever land on the same value: two transient failures then a selector fault arrives with `consecutive_failures=3` against `threshold=2`, and `3 === 2`, plus every later comparison, is false. The watch failed forever and never alerted once. Nothing surfaced it, because the watch was visibly red in the UI the whole time, so it read as "known broken" rather than "the alerting is broken." The same mismatch in reverse can also send a DUPLICATE alert, when the streak drifts from a lower-threshold class into a higher one and re-crosses.
+## A Threshold That Moves with the Input Cannot Be Equality-Compared Against a Counter That Outlives It
 
-An independent verifier reviewing the fix found the identical bug shape two lines away: the thresholds being compared against were themselves built with `Math.max(1, Number(rawEnvVar || fallback))`, and a malformed env var makes that `NaN`; every comparison against `NaN` is false, so one config typo silently disabled alerting for the whole install with nothing to show for it.
+A "notify once when a counter crosses a limit" check written with `===` breaks silently whenever the limit is not a fixed constant. Example: `consecutive_failures === alertThreshold(error)`, where the counter belongs to the whole failure STREAK but the threshold depends on the LATEST error's class (transient network fault alerts at 4, page-level fault at 2). Two transient failures then a page fault arrives with `consecutive_failures=3` against `threshold=2`; `3 === 2` and every later comparison is false, so it fails forever and never alerts. Because the item is visibly red in the UI, it reads as "known broken" rather than "alerting is broken." The reverse drift can send DUPLICATE alerts.
+
+A sibling bug often sits nearby: thresholds built as `Math.max(1, Number(rawEnvVar || fallback))` become `NaN` on a malformed env var, and every comparison against `NaN` is false, so one config typo disables alerting for the whole install.
 
 How to apply:
-- Any counter-crosses-a-limit check where the limit can move (varies by input class, is read from config/env, or is otherwise not a hardcoded constant) needs `>=`, not `===`. Track "have we already fired?" as its own persisted fact (a boolean or timestamp), never re-derived from the moving counter/threshold pair. Derive the paired close-out (recovery / resolve / all-clear) from that SAME persisted fact, not by re-evaluating the open condition; re-deriving it reads today's inputs to answer a question about yesterday, and the two paths drift apart silently.
-- Any threshold built from `Number(x)` / `parseInt` / `parseFloat` without an explicit NaN check fails the same way: `NaN` in any comparison is always false, so the guard fails open (never fires) rather than erroring. Validate parsed config at the boundary and fall back explicitly, and check the empty-string case separately, since `Number('')` is `0`, not `NaN`; an unset/empty value needs its own branch or it silently becomes a live threshold of 0.
-- Test the TRANSITION case (a streak that changes class, a config value that is malformed vs. merely absent), not just a steady run of one class; a steady-state test passes identically on the buggy and the fixed code.
-- When you find one instance of a "guard that cannot fire" shape, grep the same module for siblings before closing the finding; this one had two within five lines of each other.
+- Any counter-crosses-a-limit check where the limit can move (varies by input class, read from config/env) needs `>=`, not `===`. Track "have we already fired?" as its own persisted fact (a boolean or timestamp), never re-derived from the counter/threshold pair. Derive the paired close-out (recovery / resolve / all-clear) from that SAME persisted fact; re-evaluating the open condition reads today's inputs to answer a question about yesterday.
+- Any threshold built from `Number(x)` / `parseInt` / `parseFloat` without an explicit NaN check fails open. Validate parsed config at the boundary and fall back explicitly. Check the empty-string case separately: `Number('')` is `0`, not `NaN`, so an unset value can silently become a live threshold of 0.
+- Test the TRANSITION case (a streak that changes class, a config value that is malformed vs. merely absent), not just a steady run of one class; a steady-state test passes on both buggy and fixed code.
+- When you find one "guard that cannot fire," grep the same module for siblings before closing the finding.
+
+## A Stemmer/Lookup That Strips to a Bare Key Must Try the Index's Actual Citation Form First
+
+When a lookup strips affixes before indexing into a dictionary, lexicon, or enum table, don't assume the bare stem is a valid key; check what form the index actually keys entries under. If the dictionary lists verbs only under a citation form (stem + a specific ending), the bare stem not only misses, it can COLLIDE with unrelated headwords sharing the same letters, so inflected forms are confidently resolved to the wrong word. If those wrong results feed a downstream prompt or pipeline as authoritative, the error propagates invisibly. A "miss" count alone never surfaces this.
+
+How to apply:
+- When a lookup strips an affix, generate candidates in the form the index actually uses (stem + citation/canonical ending) and try those before falling back to the bare stem.
+- Measure over the entire dataset, not a sample, and count wrong-hits separately from misses. A stripped key silently matching an unrelated entry is worse than no match.
+- If an affix is ambiguous across word classes, keep the existing reading as the first candidate and add the citation-form lookup as a fallback, so the fix can't regress cases that already worked.
+- Diff old-vs-new resolution across the WHOLE dataset before shipping, not just the targeted cases, to catch regressions in categories the change wasn't meant to touch.
