@@ -20,7 +20,7 @@ Wire `--check` into CI so a new guidance file cannot land undiscoverable. A file
 |---|---|
 | `guidance/ESSENTIAL.md` | AUTO-LOADED at SessionStart: top most-violated rules |
 | `guidance/code-review.md` | self-review checklist before committing |
-| `guidance/concurrent-sessions.md` | several sessions share one checkout; worktrees, resource locks, claim-guard, "it keeps reverting" |
+| `guidance/concurrent-sessions.md` | several sessions share one checkout; worktrees, resource locks, claim guards, "it keeps reverting" |
 | `guidance/context-progress.md` | context.md and progress.md specs |
 | `guidance/debugging.md` | diagnosing issues, log analysis |
 | `guidance/deep-research.md` | research depth and methodology before producing guides or recommendations |
