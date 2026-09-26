@@ -1,6 +1,8 @@
 # context.md
 
 ## Last Updated
+2026-09-25: `guidance/ESSENTIAL.md` rewritten from the source's new short form (each rule stated as its directive; the source moved rationale to a detail file so the always-loaded text stays under the 8,000-byte hook budget). Hook comments that named specific private projects replaced with generic examples; the publisher now screens every staged file regardless of extension and rejects files naming a private repo.
+
 2026-08-21: GitHub repo description replaced (it still described the superseded lessons model); portfolio now links here instead of the private source. Earlier: repo created, rebuilt from a lessons feed into the working harness, 19 guidance files published.
 
 ## What This Repo Is

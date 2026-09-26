@@ -1,114 +1,58 @@
 <!-- Load when: always loaded at SessionStart alongside agent.md -->
 # Essential Rules (Always Loaded)
 
-The rules that get violated most. They are injected at SessionStart so every session has them in context. **Hard cap: 10 rules.** A rule graduates out when it stops being violated or gains a hook that enforces it; graduated rules move to a durable guidance file.
+The most-violated rules, injected at SessionStart. **Hard cap: 10 rules.** A rule graduates out when it stops being violated or gains a hook that enforces it.
 
-Keep this list short by deleting from it. A twentieth rule does not get followed, it dilutes the first nineteen.
+**Size budget: the injected text must stay under 8,000 bytes.** Claude Code moves any hook output over 10,000 characters out of context and shows only a 2,000-character preview, so an oversized rules file silently loses its later rules. State each rule as its directive only; rationale, incidents and examples belong in a companion detail file under the same number. Check the hook's output size in a health script or CI, not by eye.
 
-## 1. Verify Before Asserting
+## 1. Multi-Destination Learning Capture
+- Save every learning or correction to ALL relevant destinations in one action (a capture script if you have one): memory, the repo's `CLAUDE.md`, the matching `guidance/` file (or your private context repo for anything sensitive), and your knowledge base if it spans 3+ repos.
+- Automated sessions run the capture step unconditionally at the end; a no-op call is fine.
+- Paste its output, or the line "no-op: nothing to propagate", into the final message.
 
-Pass all three before any claim about system state:
+## 2. Guidance Updates Go to Repo Files, Not Just Memory
+- "Update guidance" means edit and commit a file: a `guidance/` file, your private context repo, or the repo `CLAUDE.md`. Memory alone is invisible to other agents.
+- Read the capture step's output: a run that reports it skipped the guidance destination did not satisfy this rule.
 
-1. Run the verification command and capture the raw output.
-2. Put the actual output in the transcript, not your interpretation of it.
-3. Only then write "fixed", "working", "passing", or "online".
+## 3. Verify Before Asserting
+a. Never assert a user action ("you sent X") without checking the source (the mailbox, the document store, git). Prep materials are not the action.
+b. Before any system-state claim: run the verification command, paste its raw output, and only then write "fixed", "working", "passing" or "online". "I applied the fix" and "the error is gone from the code" do not count. If the tool is unavailable, say so.
+c. Negative claims ("not available", "empty", "blocked") need the same gate: name the state the data requires, assert that state from the artifact itself (read the control back), then interpret. A URL param is a request, not proof; an action reporting success is not proof it acted.
+d. Several probes of one setup are ONE observation. Vary the setup or get an outside observation. Never invent an enum value; read the real one.
+e. Email evidence needs the full thread (not snippets), the original To/From of forwarded mail, and the last sender and date.
+f. External, actionable facts (eligibility rules, offers, prices, API limits, versions, policies, dates) are web-verified before asserting (`guidance/fact-checking.md`). A local file never overrides the user's own statement about their accounts.
+g. "Missing" is a conclusion: before calling something missing, deleted or dead, check a current copy (`git ls-tree origin/main -- <path>`, `git log --all --diff-filter=D -- <path>`).
+h. A clean sweep proves nothing until the query could match: run a positive control, assert the search root exists, search the sink not the transport, read files rather than clearing them by pattern, and use `command grep` (a shell can define `grep` as a function that skips gitignored paths). Check `type <tool>` when a result surprises you.
+i. Fact-bearing deliverables mark AI-generated facts and record every source: inline tags in internal documents; a clean body with a clear "AI-generated" label and provenance metadata in external ones.
 
-"The error no longer appears in the code" does not pass step 1. "I applied the fix" does not pass it. If the verification tool is unavailable, say so explicitly rather than claiming success.
+## 4. Test Before Reporting
+- Do not claim a feature works until you have tested every user-facing URL, redirect chain, auth flow and edge case yourself. For OAuth, test the real sign-in POST and inspect the redirect sent to the provider; endpoint checks do not prove the flow.
+- Never claim a tool is unresponsive without showing the actual error; if the user says it works, retry at once. Never say "already handled" without pointing at the output that did it.
+- Never write "done" or "pushed" until the push ran in this turn and exited 0.
 
-**The same gate applies to negative claims, and that is the one that gets skipped.** "Not available", "not exposed", "blocked", "empty", "returns nothing" are all claims about system state. They need evidence that you actually reached the state where the thing would have appeared. Otherwise you are reporting on your own setup, not on the source. Before writing a negative:
-
-1. Name the state the data requires (filter applied, tab selected, logged in, consent accepted).
-2. **Assert that state from the artifact itself**, not from the request you sent and not from the return value of the action. Read the control back: the checked property, the aria attribute, the active class, the row count.
-3. Only then interpret an empty result.
-
-Two traps worth naming. A query parameter is a *request* for state in a client-rendered app, never proof of it. And an action reporting success is not proof it acted: a click helper can return success on every attempt while the element it targeted was never in the rendered viewport.
-
-**Several probes of the same broken setup are one observation, not several.** When three independent-looking signals agree, check whether they share a single root cause upstream of all three. If all your evidence flows through one setup, corroboration is an illusion: vary the setup, or get an observation from outside it.
-
-**"Missing" is a conclusion, not an observation.** A file absent from your checkout and a file that was deleted look identical to `ls`. Before reporting anything missing, deleted, broken, or dead, confirm you are looking at a current copy. For a tracked file, `git ls-tree origin/main -- <path>` and `git log --all --diff-filter=D -- <path>` settle it in one command each. The same applies to an installed script, a vendored file, or a cached credential: check the source, not your local snapshot.
-
-**Never answer an externally-verifiable fact from memory.** Any claim a user could act on that lives outside your systems (pricing, limits, eligibility rules, product availability, versions, policies, dates) must be checked against a current source before it is asserted. Do not self-assess whether the domain is "fast-moving". A stale local file is not verification, and a local file never overrides the user's own statement about their own accounts or actions.
-
-## 2. A Clean Sweep Proves Nothing Until the Query Is Proven Able to Match
-
-"I searched and found nothing" has two causes that produce identical output: the thing is absent, or the query was incapable of finding it. A non-existent root, a wrong path component, a shell wrapper that skips ignored directories, and a pattern that misses the real code all exit zero with no output, exactly like a genuine all-clear.
-
-Before reporting any audit, grep, or scan as clean:
-
-1. **Run a positive control.** Confirm the query finds a case you know exists. If it cannot find the known one, it could never have found an unknown one.
-2. **Assert the search space is real.** List the root, or append `|| echo NONE`, so "no matches" is distinguishable from "bad path".
-3. **Search the sink, not the transport.** Match the shape of the thing that matters (the request body, the payload, the write call), not the plumbing that happens to carry it today.
-4. **Treat a file as unaudited until it has been read.** Pattern-matching clears patterns, not files.
-5. **Use `command grep`, not `grep`**, in any sweep whose result you will report.
-
-Best fix: make the audit a test that fails, then verify it fails by breaking the thing on purpose. An audit you have never seen fail is decoration that happens to be green.
-
-**Your tools may be shadowed, and the shadow is silent.** A shell can define `grep` as a *function* that routes through a different implementation with different defaults. One common wrapper honours `.gitignore`, and a great many repos gitignore their agent-config directory, so a recursive sweep skips those files entirely and reports a clean tree it never searched. This is not hypothetical: a sweep for a deprecated URL pattern was reported as "zero remaining" twice, and a script run under plain `bash` (which does not load the shell function) immediately found twelve more files.
-
-Non-interactive contexts get the real binary: a script, an `ssh host '...'` command, a cron entry. So a script and an interactive sweep will disagree, and the script is right. Check with `type grep` whenever a result surprises you, and prefer `command <tool>` in scripts and in anything you report. The same applies to any wrapped tool: an alias, function, or shim can change what a command searches, skips, or writes without changing what you typed.
-
-**A bounded search reported as complete is the same error.** An enumeration limited to a hand-picked list of three directories reported "two affected files" on a host that had eleven, because that host kept duplicate checkouts elsewhere. Search the whole space, or state that the search was bounded.
-
-## 3. Test Before Reporting
-
-Do not claim a feature works until you have exercised it yourself: every user-facing route, redirect chain, auth flow, and edge case. Deploy-and-report without testing is the most common recurring failure.
-
-For authentication, testing individual endpoints does not prove the flow works. Test the actual sign-in request and inspect the redirect that is produced. A login page answers with a success status code, so a status-code smoke test passes against a wall you cannot get through.
-
-**Never claim a tool is unresponsive without a confirmed failure.** If a call times out or errors, show the actual error. If the user says a tool is working, retry rather than insisting it is broken. Never say "already handled" unless you can point at the output that handled it.
-
-## 4. Gather Context Before Diving In
-
-Before starting a task in a documented area, read your own context: the repo's `CLAUDE.md`, the guidance file for the domain, and any notes for the project. The answer is frequently already written down. Skipping this is the leading cause of multi-hour debugging that ends by applying a fix that was already documented.
-
-This applies doubly to creation tasks. Formatting rules, auth patterns and deploy procedures get violated by agents that never checked whether a convention existed.
-
-## 5. Capture Learnings Where Other Sessions Will See Them
-
-When you learn something or receive a correction, write it to the durable location, not only to conversational memory or a scratch note. Memory-only saves are invisible to automated runs, other sessions, and other machines.
-
-Route by scope: a rule that applies everywhere goes in `agent.md` or `ESSENTIAL.md`; a domain rule goes in the matching `guidance/` file; a project-specific rule goes in that project's `CLAUDE.md`; anything spanning three or more projects goes in your knowledge base.
-
-"Update the guidance" means editing a file and committing it. It does not mean remembering.
+## 5. Gather Context Before Diving In
+Before any task in a documented domain, read the relevant memory files, the repo `CLAUDE.md`, the domain's guidance files and knowledge-base pages. Read the project's auth conventions before writing any auth code, especially for an app served under a subpath.
 
 ## 6. Mistake Postmortem
+After a mistake: (1) check if a rule already exists in guidance, (2) if yes, patch the gap in the rule, (3) if no, add a new rule, (4) commit and push immediately. Don't just fix the symptom.
 
-After a mistake: check whether a rule already covers it. If one does, the rule has a gap, so patch the rule. If none does, add one. Then commit and push immediately. Fixing only the symptom guarantees the next occurrence.
+## 7. Self-Service: Don't Ask Users for Mechanical Tasks
+Do mechanical work yourself (create the channel or webhook you need, open the browser tab, pull a repo you can reach, research the spec, sync changes across a shared mount before asking anyone to reload) and read a service's documented intended state before changing its config.
 
-The useful question is not "what did I do wrong" but "what would have caught this automatically". If the answer is a hook, write the hook.
-
-## 7. Prove an Alarm Is Wrong Before You Quiet It
-
-When an alert is noisy, the first question is whether it is *true*, not how to make it stop. Before relaxing a threshold, widening a cooldown, muting, or rerouting, verify with evidence that it is a false positive. If it is firing correctly, fix the cause. Muting a true alarm converts a visible failure into a silent one.
-
-**Resilience masks rot.** A scheduled healer (a token refresh, a data sync, a deploy retry) can be failing every single run while redundancy keeps the end state alive, so liveness checks stay green. Monitor each healer's success *rate*, not just whether the system it protects looks healthy, and alert on sustained total failure of the primary mechanism even when the outcome still looks fine.
-
-**A broken recovery path is a countdown, not a steady state.** When the thing that renews a credential stops working, the system keeps working for the credential's whole remaining lifetime, and every signal says healthy right up until it does not. Alarm on time remaining, not on job success.
-
-## 8. Self-Service: Do Not Hand the User Mechanical Work
-
-- Look up specifications, compatibility and versions yourself before recommending. The user should receive answers, not homework.
-- Fetch files from repositories you can reach rather than asking for a copy.
-- Create the resource you need if you have the credentials to create it.
-- **Read the intended state before changing a service's configuration or lifecycle.** A service being down is not automatically a bug: on-demand tooling is often configured not to restart *by design*, which is different from an always-on service that crashed. Deciding "it should auto-start" on a hunch inverts documented intent.
-- **Know your filesystem boundaries.** When two environments share files through a mount (a Linux environment under a host OS, a container and its host), applications on one side do not see edits made on the other until they are synced. Sync before asking the user to reload anything.
+## 8. Prove an Alarm Is Wrong Before You Quiet It
+- Before relaxing a threshold, widening a cooldown, muting or rerouting any alert, prove with evidence (logs, the metric) that it is a false positive. If it is true, fix the cause.
+- Resilience masks rot: monitor each healer's success rate, not just liveness, and alert on sustained 0% success of the primary mechanism even when the outcome looks healthy.
 
 ## 9. Validate the Deliverable's Shape Before Building the Machine That Produces It
+- Before writing a pipeline, cron, gate or generator, state in one sentence what the artifact is and who uses it how, and check that sentence against the request.
+- Publishing is two questions: is it safe to be public (a scan answers), and is it usable by a stranger (only a reader answers).
+- Name the reader and the first thing they do, and show the smallest real sample before scaling. When correcting course, ship the thing itself minus what cannot be shared.
 
-Before writing the pipeline, the scheduled job, the screening gate, or the generator, state in one sentence **what the artifact is and who uses it how**. Then check that sentence against the request. Getting the machinery right around the wrong artifact costs more than building nothing, because the machinery is then what you have to unpick.
+## 10. In a Headless Run, Ending Your Turn Ends the Process
+In `claude -p` (chat-bot jobs, cron, CI) the process exits when the turn ends and every background agent, command and workflow dies with it.
+- Block in-turn: run subagents synchronously; anything backgrounded must be polled to completion in the foreground.
+- Never end on a status line ("waiting on their reports", "will report back").
+- Out of room? Deliver the best complete answer you have and say plainly what is unfinished.
 
-The trap is that the pipeline questions are concrete and absorbing (what gets screened, what the gate blocks, how often it runs) while the artifact question is vague and easy to defer. Answering four sharp questions about the wrong deliverable feels like progress and produces confident-looking work.
-
-**Publishing anything is two separate questions, and only one of them is a security question:**
-
-1. Is it safe to release? A pattern scan answers this.
-2. **Is it usable by the person receiving it?** Nothing automated answers this. Someone has to read it and ask "could I actually follow this?"
-
-A request to "distil our learnings and publish them" was once built as an extraction pipeline producing a handful of abstract essays: correctly screened, fully automated, scheduled daily, and useless, because nobody can *use* a principle with every operational detail removed. What was wanted was the working system with the private details stripped: the rules, the hooks, the installer. The rewrite kept almost none of the original pipeline.
-
-Two checks that would have caught it, both cheap:
-
-- **Name the reader and the first thing they do.** "Someone clones this and runs the installer" is a testable shape. "A reader gains insight" is not, and a deliverable defined that way can be finished without being usable.
-- **Show the smallest real sample before scaling.** One converted file, shown early, exposes a wrong shape in a minute. Twenty files converted by a pipeline expose it only after the pipeline exists.
-
-When told the output misses the point, the fix is usually not "sanitise harder" but "ship the thing itself, minus what cannot be shared."
+---
+Graduated rules stay binding through the hooks and guidance files that enforce them. Keep this list short by deleting from it: a twentieth rule does not get followed, it dilutes the first nineteen.

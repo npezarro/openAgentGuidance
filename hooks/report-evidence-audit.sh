@@ -15,7 +15,7 @@
 # but I won't") matches V2 and takes the one-block revision round trip. Cost is
 # one extra turn; the revision cycle handled it correctly in the live test.
 #
-# Deployment: intended for HEADLESS pipeline hosts (VM #requests worker). Not
+# Deployment: intended for HEADLESS pipeline hosts (for example a server-side request worker). Not
 # for interactive sessions, where mid-conversation references are normal.
 # Blocks at most once per session; honors stop_hook_active.
 set -euo pipefail

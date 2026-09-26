@@ -5,7 +5,7 @@
 #
 # Exists because the Edit/Write tool path is not the only way a session writes a repo
 # file: heredocs, redirects, sed -i and python rewrites are all invisible to a
-# file_path-based tracker. 2026-07-30: browser-agent progress.md was rewritten by one
+# file_path-based tracker. 2026-07-30: one repo's progress.md was rewritten by one
 # session through a python heredoc while another committed the same path.
 #
 # No side effects, no output except the functions' own stdout. Callers set -u safe.

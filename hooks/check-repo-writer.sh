@@ -4,8 +4,8 @@
 # agent as its writer-of-record.
 #
 # Repos declare in their CLAUDE.md (anywhere in the file, one per line):
-#   writer: <name>            e.g. "writer: learnings-pass" or "writer: human"
-#   canonical-copy: <path>    e.g. "canonical-copy: ~/repos/autonomousDev-private"
+#   writer: <name>            e.g. "writer: learning-agent" or "writer: human"
+#   canonical-copy: <path>    e.g. "canonical-copy: ~/repos/<canonical-repo>"
 #
 # Semantics:
 #   canonical-copy present  -> ANY write here gets a warning (stale mirror).

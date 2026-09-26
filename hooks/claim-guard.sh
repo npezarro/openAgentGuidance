@@ -4,11 +4,11 @@
 # The problem it fixes (2026-07-17 and again 2026-07-30): several Claude sessions run
 # in the same ~/repos checkout with --dangerously-skip-permissions, and nothing tells
 # them about each other. One session's `git add -A` closeout committed another's work;
-# on 2026-07-30 two live sessions committed browser-agent progress.md 58 seconds apart
+# on 2026-07-30 two live sessions committed one repo's progress.md 58 seconds apart
 # and only survived because both diffs happened to be insert-only.
 #
 # The existing defenses were the wrong shape: session-heartbeat.sh answers "is a human
-# live" (so autonomousDev crons defer), and check-repo-writer.sh answers "is this repo
+# live" (so autonomous crons defer), and check-repo-writer.sh answers "is this repo
 # owned by an agent". Neither answers "is another session writing THIS path right now".
 #
 # Two modes:
@@ -272,7 +272,7 @@ EOF
 
 if [ "$KIND" = "rsync --delete into /var/www" ]; then
   # rsync is SRC... DEST, so the contested path is the LAST /var/www argument.
-  # Taking the first one reads `rsync /var/www/staging-shopper/ /var/www/shopper/`
+  # Taking the first one reads `rsync /var/www/staging-app/ /var/www/app/`
   # as a claim on staging and lets the production overwrite through.
   DEST=$(printf '%s' "$CMD" | grep -oE '/var/www/[A-Za-z0-9_.-]+' | tail -1)
   [ -z "$DEST" ] && exit 0

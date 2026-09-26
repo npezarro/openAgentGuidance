@@ -14,7 +14,7 @@ Each `<name>.md` defines a specialist subagent (frontmatter `name` + `descriptio
 - **security**: threat modeling, auth, secrets hygiene, hardening
 - **verifier**: independent skeptic that refutes "it works / fixed / passing" claims before they are reported or merged
 
-## Sync (mirrors the claude-skills pattern)
+## Sync (mirrors the skills-repo pattern)
 Edit in this repo, then copy to the active location, commit, and push here for history:
 
 ```bash

@@ -111,7 +111,7 @@ elif [ "${1:-}" = "--all-public" ]; then
 
   # Get list of public repos
   # NOTE: --limit is required; gh defaults to 30 and silently caps the list, which
-  # left public repos beyond the first 30 (e.g. claude-auto-merger) unprotected.
+  # left public repos beyond the first 30 (e.g. a bot's own repo) unprotected.
   PUBLIC_REPOS=$(gh repo list "${GH_OWNER:-$(gh api user --jq .login 2>/dev/null)}" --public --limit 1000 --json name -q '.[].name' 2>/dev/null || echo "")
 
   if [ -z "$PUBLIC_REPOS" ]; then

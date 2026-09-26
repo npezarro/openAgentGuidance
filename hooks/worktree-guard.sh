@@ -107,7 +107,7 @@ is_my_subagent() {
 # gate -- a rule this ecosystem already documents and which I violated on the first cut.
 #
 # It produced a real false positive on 2026-08-03: session 31f99dcb was denied on
-# `claude-skills/CLAUDE.md`, a file this session had never edited. The inference had
+# a skills repo's `CLAUDE.md`, a file this session had never edited. The inference had
 # recorded it from `rsync --exclude CLAUDE.md`, i.e. a filename that appeared in a command
 # precisely because it was being EXCLUDED. That session acked and carried on, which is the
 # routed-around outcome the guard exists to avoid.
@@ -122,7 +122,7 @@ FP_REAL=$(realpath -m "$FP" 2>/dev/null || printf '%s' "$FP")
 # Does this ledger record a write to the SAME file? Returns 0 on a hit.
 #
 # Ledger paths are absolute but NOT normalized: a real entry observed 2026-08-03 was
-# `/home/.../browser-agent/./browser-cli.sh`, which fails plain equality against the
+# `/home/.../<tool>/./cli.sh`, which fails plain equality against the
 # realpath'd target and would silently never fire. Collapsing `/./` and repeated slashes
 # in awk is pure string work, so it stays cheap on a hook that runs on every Edit.
 #
