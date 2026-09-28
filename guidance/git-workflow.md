@@ -3,52 +3,51 @@
 
 ## Branch Rules
 - Never commit directly to `main` (or whatever the default branch is).
-- Use the branch you were assigned. If there isn't one, create one: `agent/<task-name>` or `claude/<task-name>`.
-- **Don't use `test-` as a branch prefix.** Some repos have rulesets or branch protection that silently reject pushes to `test-*` branches. You get no error; the branch just never shows up on the remote. Use names like `add-tests-<module>` or `<module>-tests-<run>` instead.
-- Commit messages should explain **why**, not just what. Large commits are fine, so don't split work up artificially.
+- Use the branch assigned to you. If none exists, create one: `agent/<task-name>` or `claude/<task-name>`.
+- **Avoid `test-` as a branch prefix.** Some repos have GitHub rulesets or branch protection that silently reject pushes to `test-*` branches: there is no error, and the branch just never appears on the remote. Use descriptive names like `add-tests-<module>` or `<module>-tests-<run>` instead.
+- Commit messages explain **why**, not just what. Large commits are fine; don't split work artificially.
 - Before committing:
-  1. Run `git status` to check that no unintended files are staged.
-  2. Run `git diff` to review the actual changes.
+  1. `git status` to verify no unintended files are staged.
+  2. `git diff` to review the actual changes.
   3. Confirm no `.env`, secrets, or key files are included.
-  4. **Update `context.md`**. This is required on the final commit of a branch (before you open a PR) or at session wrap-up, but not on every intermediate commit. It records current state, open items, and what the next agent needs to know.
-  5. **Update `progress.md`** with an entry for the work you're committing.
-- Push with `git push -u origin HEAD`. Retry network failures up to 4 times with backoff (2s, 4s, 8s, 16s). Don't retry auth failures.
+  4. **Update `context.md`** (the repo's handoff notes for the next agent: current state, recent changes, open items). This is mandatory on the final commit of a branch (before creating a PR) or at session wrap-up. It is not required on every intermediate commit.
+  5. **Update `progress.md`**: add an entry for the work being committed.
+- Push: `git push -u origin HEAD`. Retry network failures up to 4 times with backoff (2s, 4s, 8s, 16s). Do not retry auth failures.
 
 ## All Deliverables Go in Repos
-Scripts, tools, project assets, analysis docs, reference files and any other output **always go in a git repo** that is pushed to the remote. Never leave files lying loose on the filesystem. The remote is the source of truth. If a new project or tool set has no repo yet, create one with `gh repo create`.
+When creating scripts, tools, project assets, analysis docs, reference files, or any other output, **always put them in a git repo** and push to GitHub. Never leave files as loose filesystem artifacts; the user should not have to dig around the filesystem for deliverables. GitHub is the source of truth. If a new project or tool set doesn't have a repo yet, create one with `gh repo create`.
 
-**This is the most common mistake.** Sessions often create useful files (summaries, configs, scripts, reference docs), then forget to commit, forget to push, or save them outside a repo. Local-only files can't be reached from later sessions. Until a file is committed and pushed, treat every write or edit as unfinished.
+**This is the most common mistake.** Sessions routinely create useful files (summaries, configs, scripts, reference docs) and then forget to commit, forget to push, or save them outside a repo. The user cannot access local-only files between sessions. Treat every file write as incomplete until the file is committed and pushed.
 
 ## Every Repo Gets a README and Description
-Every repo needs a `README.md` and a remote repo description. If you create a repo, or work in one that lacks either, add them.
+Every repo must have a `README.md` and a GitHub repo description. When creating a new repo, or working in one that's missing either, add them.
 
-- **README.md**: what the project does (1-2 sentences), how to set it up, and how to run or use it. Keep it short. A developer should understand the project in 60 seconds.
-- **Repo description**: set it with `gh repo edit <owner>/<repo> --description "one-line summary"`. Write one sentence; it shows on the repo page and in search results.
+- **README.md**: what it does (1-2 sentences), how to set it up, and how to run or use it. Keep it concise; a developer should understand the project in 60 seconds.
+- **GitHub description**: set via `gh repo edit <owner>/<repo> --description "one-line summary"`. A single sentence that appears on the repo page and in search results.
 
-Both are required when you run `gh repo create`. Pass the `--description` flag at creation and include the README in the initial commit.
+Both are required when running `gh repo create`. Use the `--description` flag on creation and add the README in the initial commit.
 
 ## Always Commit and Push Written Files
-When you create or change files in a repo, **commit and push in the same step**. Don't move on while untracked or uncommitted files sit in the repo.
+When creating or modifying files in any repo, **commit and push in the same step**. Don't move on to other work with untracked or uncommitted files sitting in a repo. Writing a file does not commit it; you must do that explicitly.
 
-When you commit, **always push to the remote branch too**. Unpushed commits are invisible to other sessions, collaborators and the deploy pipeline. Treat write + `git commit` + `git push` as one atomic operation. If any step fails, find the cause and fix it before you continue.
+When committing to any repo, **always push to the remote branch too**. Unpushed commits are invisible to other sessions, collaborators, and the deploy pipeline. Treat file creation + `git commit` + `git push` as one atomic operation; if any step fails, diagnose and fix it before moving on.
 
-**Common gap:** when a session spans several repos, it's easy to push some and forget others. After a multi-repo task, run `git status` in each repo to confirm it's clean.
+**Common gap:** when working across several repos in one session, it's easy to push some and forget others. After a multi-repo task, run `git status` in each one and confirm all are clean.
 
-## Staging Hygiene (ANY repo with in-flight work)
+## Staging Hygiene (any repo with in-flight work)
 
-**This applies to every repo, not just ones you know are shared.** Any checkout can hold uncommitted work from an earlier session, and a blanket add quietly ships that work under your commit message.
+Some repos are worked by many agents at once (interactive sessions, scheduled agents, doc-sync jobs). **This is not a "shared repo" rule; it applies to every repo.** Any checkout can hold uncommitted work from a previous session, and a blanket add silently ships it under your commit message. A repo that is not on anyone's "shared" list is exactly where this bites: a `git add -A` can sweep someone's half-finished feature into your unrelated fix.
 
-Lesson: in a repo nobody thought of as shared, a `git add -A` swept a half-finished adapter, a scrape script and a settings change into an unrelated commit. A `git show --stat` review before pushing caught it. The rule already existed, but it had been scoped in a way that made it look like it didn't apply.
+The check is cheap and unconditional: **run `git status` BEFORE staging.** If the tree holds anything you didn't touch, name your paths explicitly.
 
-The check is cheap and always required: **run `git status` BEFORE staging.** If the tree holds anything you didn't touch, stage your paths by name.
-
-- **Stage explicit paths. Never use `git add -A` or `git add .`** in any repo. A blanket add pulls whatever another agent left uncommitted into *your* commit, and that can include secrets. Name the files you touched: `git add guidance/foo.md scripts/bar.sh`.
-- **Never use `--no-verify` on a public repo.** A pre-commit sensitive-identifier scanner is the last defense before a username, internal path or token lands on a public remote. Bypassing it is how leaks ship. If the scanner blocks you, remove the identifier from the content; don't override the scanner.
-- **Before committing, run `git status` and confirm ONLY your files are staged.** If you see files you didn't touch, unstage them with `git restore --staged <path>`. They belong to another agent.
+- **Stage explicit paths; never `git add -A` or `git add .`** A blanket add sweeps whatever another agent left uncommitted into *your* commit, and can stage a secret along with it. Name the files you touched: `git add docs/foo.md scripts/bar.sh`.
+- **Never `--no-verify` on a public repo.** A pre-commit sensitive-identifier scanner is the last line of defense before a username, internal path, or token reaches a public repo. Bypassing it is how leaks ship. If the scanner blocks you, sanitize the content; don't override.
+- **Before committing, run `git status` and confirm ONLY your files are staged.** Unstage anything you didn't touch with `git restore --staged <path>`; it belongs to someone else.
+- **Review before pushing:** `git show --stat HEAD`. If the commit contains files you didn't intend, `git reset HEAD~1` (soft) and re-commit with explicit paths.
 
 ## Creating PRs (with retry)
 
-After `git push`, GitHub can take a few seconds to register the branch. Check that the branch exists on the remote before you create the PR, and retry on failure:
+After `git push`, GitHub may take a few seconds to register the branch. Verify the branch exists remotely before creating the PR, and retry on failure:
 
 ```bash
 # 1. Wait for GitHub to register the pushed branch
@@ -60,7 +59,7 @@ for i in 1 2 3 4 5; do
   sleep $((i * 2))
 done
 
-# 2. Check for existing PR on this branch
+# 2. Check for an existing PR on this branch
 EXISTING=$(gh pr list --state all --head "$(git branch --show-current)" --json number --jq '.[0].number')
 if [ -n "$EXISTING" ]; then
   echo "PR #$EXISTING already exists for this branch"
@@ -77,13 +76,13 @@ else
 fi
 ```
 
-**Never fall back to a "create manually" URL.** If `gh pr create` still fails after 3 retries, work out the cause (auth, branch not found, network) and fix it. Don't tell the user to create the PR by hand.
+**Never fall back to a "create manually" URL.** If `gh pr create` fails after 3 retries, diagnose the error (auth, branch not found, network) and fix it. Do not tell the user to create the PR manually.
 
-- Don't enable auto-merge unless someone explicitly asks for it.
+- Do **not** enable auto-merge unless explicitly asked.
 
 ## GitHub API PR Creation: Qualify the Head Parameter
 
-If you create PRs through the GitHub REST API (for example with Octokit) instead of `gh pr create`, the `head` parameter must be fully qualified as `owner:branch`, not just `branch`.
+When creating PRs via the GitHub REST API (for example, Octokit) instead of `gh pr create`, the `head` parameter must be fully qualified as `owner:branch`, not just `branch`.
 
 ```js
 // WRONG: causes "invalid head" errors, especially on newly-pushed branches
@@ -93,96 +92,96 @@ await octokit.rest.pulls.create({ head: branch, ... });
 await octokit.rest.pulls.create({ head: `${owner}:${branch}`, ... });
 ```
 
-**Why:** GitHub needs a few seconds to index a newly pushed branch. Unqualified branch names fail more often during that window, and qualifying with the owner makes the ref lookup unambiguous.
+**Why:** GitHub needs a few seconds to index a newly-pushed branch. Unqualified branch names fail more often during that window; qualifying with the owner disambiguates the ref lookup.
 
-**Also:** in automation, wait about 3s after a push event before calling `pulls.create`, allow up to 5 attempts, and retry on "invalid head" errors. The `gh pr create` CLI qualifies the head for you; this only matters when you call the REST API directly.
+**Also:** add a ~3s delay before calling `pulls.create` after a push event, set `maxAttempts` to 5, and retry on "invalid head" errors.
 
-## If Your Repos Use an Auto-Merge Bot
+`gh pr create` handles head qualification internally. This only applies when calling the REST API directly (for example, in a merge bot).
 
-Some setups run a bot that opens a PR and squash-merges it within seconds of a branch being pushed. If yours does:
+## Working With an Auto-Merge Bot
 
-- **"No commits between main and `<branch>`" or "Head sha can't be blank" from `gh pr create` right after a push means success.** The bot already opened and merged the change. Find its PR with `gh pr list --state all --head <branch>` and use that number. Don't re-push or open a duplicate: a retry can produce a second merged PR for the same change, which makes history misleading.
-- **Verify by content, not ancestry.** A squash commit is not an ancestor of your local commit, so `git merge-base --is-ancestor` and `git branch --merged` report "unmerged" even though the change landed. Check instead:
+If your repos run a bot that opens and squash-merges PRs for pushed branches, adjust the workflow:
+
+- **Just push; don't race the bot.** The reliable pattern is `git push` and let the bot open and merge the PR. After the push, the remote branch vanishing and `gh pr create` failing with "No commits between main and `<branch>`" or "Head sha can't be blank" is **success**, not failure. Find the bot's PR with `gh pr list --state all --head <branch>` and reuse that number.
+- **Do not retry the push.** A retry can produce a second PR that also merges: two merged PRs for one logical change is misleading history even when the diffs are identical.
+- **Verify by content, not ancestry.** A squash commit is NOT an ancestor of your local commit (`git merge-base --is-ancestor <mine> origin/main` returns false, and `git branch --merged` reports your branch as unmerged). Check content instead:
   ```bash
   git fetch origin && git log --oneline -3 origin/main
-  git diff HEAD origin/main -- <paths> --stat   # empty == merged content is identical
+  git cat-file -e origin/main:<path> && echo "landed on main"
+  git diff <mine> origin/main -- <paths> --stat   # empty == merged content is identical
   ```
-  When you verify added lines with grep, use `grep -Fqx -- "$line"`. Without the `--`, a line that starts with `-` (such as a markdown bullet) is read as a grep option and the check gives false negatives.
-- **Put follow-up fixes on a FRESH branch off main.** After the bot deletes the merged branch, a second commit pushed to the same name conflicts every time, because main has one squashed commit while your branch still has the originals. Instead: `git checkout -b <new> origin/main`, `git checkout <old-branch> -- <only the changed files>`, commit, push, and close any stale PR. Confirm the push landed with `git ls-remote --heads origin <branch>`; the local `origin/<branch>` ref goes stale as soon as the bot deletes the branch.
-- **Default is often opt-out: every non-draft PR from any pushed branch gets merged.** That includes design or experimental branches never meant for main. For a branch that shouldn't merge yet, convert its PR to draft right after pushing (`gh pr ready <n> --undo`). If the bot supports a repo denylist or commit-message overrides (for example `[no-automerge]`), add product repos with real human or design branches to the denylist *before* their first push, not after an unwanted merge.
-- **Resolve the default branch; don't assume it.** Some repos use `master`. Use `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`.
-- **Automation that creates PRs must confirm they actually merged.** Logging "PR: <link>" isn't enough. As the session's last step, run `gh pr view <n> --json state,mergeable`, and merge right away if it's MERGEABLE with passing CI. Otherwise verified fixes can sit unmerged for days.
+  When verifying added lines with grep, use `grep -Fqx -- "$line"`. Without `--`, any added line starting with `-` (a markdown bullet) is parsed as a grep option and verification silently reports false negatives.
+- **Don't assume the default branch is `main`.** Some repos use `master`. Resolve it with `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`.
+- **A bot that merges every non-draft PR by default is dangerous for design or human-review branches.** If the bot is opt-out rather than opt-in, pushing a branch you don't want merged yet is not safe. Immediate mitigation: convert the PR to draft right after pushing (`gh pr ready <n> --undo`); draft PRs should never auto-merge. Durable fix: give the bot a repo-level denylist, plus per-commit overrides in the head commit message (for example `[automerge]` to force, `[no-automerge]` to suppress). Add any product or design repo to the denylist before its first non-trivial push, not after a merge-and-revert.
+- **Keep the bot away from branches that have their own verification gate.** If another automation creates `fix/*`-style branches and must verify them before merge, make sure the bot recognizes those prefixes as a separate lane, or it will blind-merge them on push before verification runs.
+- **In a shared checkout that can switch branches mid-operation**, don't trust the ambient staging area for a clean single-file commit. Build the commit via a temp index (`GIT_INDEX_FILE=<tmp> git read-tree` + `git commit-tree`) and push via an explicit refspec (`git push origin <sha>:refs/heads/<branch>`) instead of relying on the checkout's HEAD.
 
 ## Branch Hygiene
 
-PRs left open and unmerged cause cascading merge conflicts across every other branch. **This is the #1 cause of stuck work.** To prevent it:
+Open PRs that sit unmerged cause cascading merge conflicts across all other branches. **This is the #1 cause of stuck work.**
 
-- **Merge PRs promptly.** If a PR is ready and needs no review, merge it in the session that created it: `gh pr merge <number> --merge --delete-branch`. If the merge fails (conflict, checks pending), retry once after 5s. If it fails again, report the specific error.
-- **Rebase before opening a PR.** Run `git fetch origin && git rebase origin/main` and resolve conflicts before you push. A PR should be mergeable when it's created.
-- **One branch per task.** Don't create several branches for one feature or leave abandoned branches behind.
-- **Clean up stale branches.** At session start, check `gh pr list --state open` and `git branch -a`. If a branch has sat for more than a few days with no activity, rebase and merge it, or close it.
-- **Prune remote-tracking refs before scanning.** Run `git remote prune origin` (and the same for any other remotes) before listing branches with `git branch -a` or `git branch -r`. Without pruning, refs for branches already deleted on the remote stick around locally and inflate "open branch" counts.
-- **Cap and dedup gates in automation MUST use `git ls-remote`, not `git branch -r`.** `git branch -r` reads local tracking refs, which only refresh on fetch and can be stale even when you prune in the same script. To know which branches exist on the remote *right now*, ask the remote: `git ls-remote --heads origin 'claude/auto-*'`.
-- **In a forked checkout, always pass `--repo <owner>/<name>` to `gh`.** If a repo has both `origin` (your fork) and `upstream` (the canonical project), bare `gh pr view <n>` can resolve against `upstream`. A PR number that exists upstream will look valid even though you don't control it. Before you view, merge, close or comment on anything in a checkout that might be a fork, use an explicit `--repo`. The risk isn't a bad merge decision; it's acting on a repo you don't own.
-- **Don't leave PRs for someone else to merge** unless the task explicitly requires review. Unmerged PRs are invisible debt that grows with every new branch.
-- **Keep `context.md` and `progress.md` edits out of branches that other branches also touch.** These files conflict constantly. If you must update them, make that the very last commit before merging, after rebasing on main.
-- **If a merge fails with code conflicts on a stale branch** that holds no hand-written content worth saving, close the PR, delete the branch, and redo the work on a fresh branch from main. If the branch *does* hold real code, resolve the conflict in an isolated worktree, verify (typecheck, tests, build), push, and merge. Closing it throws the work away. Closing and recreating is right for generated content like dependency lockfile PRs.
-- **MERGEABLE doesn't mean non-redundant.** A feature PR can show MERGEABLE while its whole patch is already on main, for example when another PR that branched off it carried the code in. Before merging a PR that looks ready, run `git rebase origin/main` in a throwaway checkout. If the commit is dropped ("patch contents already upstream") or `git diff origin/main <tip>` is empty, close the PR as superseded (`gh pr close <N> --delete-branch --comment "Superseded by ..."`).
-- **Read a merged PR's body before rejecting a similar change as a duplicate.** An explicit "out of scope / follow-up" note makes the candidate sanctioned follow-up work, and the merged PR often ships helpers the follow-up should reuse. Cite the scope note in the new PR body.
-- **An UNSTABLE merge state with a failing CI check isn't automatically a blocker.** Run `gh run view --log-failed` and compare the failing files against the PR's diff. If the same failure reproduces on a fresh checkout of the base branch, it came before this PR and has nothing to do with it, so it shouldn't veto an otherwise eligible merge.
+- **Merge PRs promptly.** When a PR is ready and has no review requirement, merge it in the same session: `gh pr merge <number> --merge --delete-branch`. If the merge fails (conflict, checks pending), retry once after 5s. If it still fails, report the specific error.
+- **Verify your own PR actually merged before ending the session.** Automation that logs "PR: <link>" and stops can leave verified fixes sitting MERGEABLE + CI green for days. As the last step, run `gh pr view <n> --json state,mergeable` and merge it then if it is ready. Don't rely on a later sweep as a merge backstop.
+- **Rebase before opening a PR.** `git fetch origin && git rebase origin/main`, resolve conflicts, then push. A PR should be mergeable when it is created.
+- **One branch per task.** Don't create multiple branches for the same feature or leave abandoned branches behind.
+- **Clean up stale branches.** At session start, check `gh pr list --state open` and `git branch -a`. If a branch has been open more than a few days without activity, rebase and merge it or close it.
+- **Prune remote-tracking refs before scanning.** Run `git remote prune origin` before enumerating with `git branch -a` or `git branch -r`. Without pruning, refs for branches already deleted on GitHub stay local and inflate "open branch" counts (half the "open" branches in a scan can be phantoms).
+- **Automation cap/dedup gates MUST use `git ls-remote`, not `git branch -r`.** Local tracking refs are only refreshed on fetch and are racy even with pruning. For cap checks and backlog gates, query the remote directly: `git ls-remote --heads origin 'claude/auto-*'`. Stale tracking refs can otherwise trigger "backlog cleanup" mode when zero real branches are open.
+- **`gh` in a forked checkout can silently resolve against `upstream` instead of `origin`.** In a checkout with both `origin` (your fork) and `upstream` (the canonical project), bare `gh pr view <n>` may hit the upstream repo, and a PR number that happens to exist there looks valid. **Always pass `--repo <owner>/<name>` explicitly** before viewing, merging, closing, or commenting on a PR in a possibly-forked checkout. The danger isn't a bad merge decision on your repo; it's acting on a repo you don't control. Also don't infer ownership from branch-name patterns alone; check the PR author.
+- **Don't leave PRs for someone else to merge** unless the task explicitly requires review. Unmerged PRs are invisible debt that compounds with every new branch.
+- **Don't modify `context.md` or `progress.md` on a branch that other branches also modify** until the very last commit before merging, after rebasing on main. These files conflict constantly.
+- **If a merge fails with complex code conflicts on a stale throwaway branch:** close the PR, delete the branch, and redo the work on a fresh branch from main. Exception: if the branch holds real hand-written code, isolate the conflict (see "Legacy merge-tree" below), resolve it, verify with build and tests, and merge, rather than closing and losing the work. Closing is right for generated changes like dependency-bot lockfile PRs, where the bot will recreate them.
+- **Follow-up fixes after an auto-merge go on a FRESH branch off main.** If the bot squash-merged and deleted your branch, pushing another commit to that same branch conflicts every time (main holds one squashed commit; your branch holds the originals from the same base). Instead: `git checkout -b <new> origin/main`, then `git checkout <old-branch> -- <only the changed files>`, commit, push, close the stale PR. Verify a push landed with `git ls-remote --heads origin <branch>`, not the local `origin/<branch>` ref, which goes stale the moment the bot deletes the branch.
+- **MERGEABLE does not mean non-redundant.** A feature PR can show MERGEABLE while its entire patch is already on main (for example, a doc-update PR branched off the feature branch and carried the code in). Before merging a "ready" PR, rebase it onto `origin/main` in a throwaway checkout: if the commit is dropped as "patch contents already upstream", or `git diff origin/main <tip>` is empty, close it as superseded (`gh pr close <N> --delete-branch --comment "Superseded by ..."`) instead of producing a duplicate merge.
+- **A merged PR's "out of scope / follow-up" note is sanctioned work, not a dedup blocker.** When candidate work looks like a duplicate of a recently merged PR, read that PR's body first. An explicit follow-up note makes the candidate pre-vetted work, and the merged PR often ships helpers the follow-up should reuse. Cite the note in the new PR body.
 
 ## Staging Changes in Hook-Executing Repos: Use Worktrees, Not Branch Checkouts
 
-**Never run `git checkout <branch>` in the main checkout of a repo whose working copy is referenced by live hooks, SessionStart scripts or process-manager configs.** The harness runs directly from those paths. Switching the branch silently swaps all guidance, hooks and config to whatever the target branch holds: new rules vanish, retired rules come back, hooks behave differently. That affects every concurrent session and every agent that runs during or after the switch, and nothing warns you.
+**Never run `git checkout <branch>` in the main checkout of a repo whose working copy is referenced by live hooks, SessionStart scripts, or a process manager config** (for example, this repo if your harness loads guidance from its working copy). The harness executes directly from those paths. Switching the branch silently reverts all guidance, hooks, and config to whatever the target branch holds, for every concurrent session and every agent that runs during the switch. There is no error and no warning.
 
-**The safe pattern is a worktree:**
+Use a worktree instead:
 
 ```bash
 # Stage changes for review without touching the main checkout
 git -C <repo> worktree add /tmp/wt-<repo> -b claude/<task>
-# ... make edits, commit, push, open PR from inside /tmp/wt-<repo> ...
+# ... edit, commit, push, open PR from inside /tmp/wt-<repo> ...
 git -C <repo> worktree remove /tmp/wt-<repo>
-# Main checkout stays on main throughout; hooks keep running from live state
+# The main checkout stays on main throughout; hooks keep running from live state
 ```
 
-**Repos that require worktrees:** any repo whose working-copy path appears in a hook, a SessionStart command, or a process-manager config that loads files at runtime.
-
-**A worktree that pushes straight to the default branch** (for example, an append-only log) must stay detached. Never run `checkout -B <default-branch>` inside it, because that collides with the primary checkout's branch.
-
-### Rescuing an existing branch with `git worktree add <path> <branch>` can pick up a stale local ref
-
-`git worktree add /tmp/wt -b <new>` always creates a fresh branch. But `git worktree add /tmp/wt <existing-branch>` (bare name) resolves to the **local** ref. For a long-lived branch that earlier sessions updated only from worktrees pushing straight to origin, that local ref can be weeks behind `origin/<branch>`. Merging main into the stale ref then shows phantom conflicts that were already resolved on origin, and any resolution you push gets rejected as non-fast-forward.
-
-**Fix:** before creating the worktree, compare `git rev-parse <branch> origin/<branch>`. If they differ, fast-forward the local ref first with `git branch -f <branch> origin/<branch>`. That's safe because the ref is only a bystander pointer and the main checkout stays on main.
+**A worktree that pushes directly to the default branch** (for example, an append-only log) must stay detached. Never `checkout -B <default-branch>` inside it; that collides with the primary checkout's own branch.
 
 ### Merge a worktree branch from the primary checkout
+`git checkout main` inside a worktree fails with "fatal: 'main' is already used by worktree at ..." because the primary checkout holds it. And running `git worktree remove` while your cwd is inside that worktree leaves the shell with no working directory.
 
-- `git checkout main` *inside* a worktree fails with "fatal: 'main' is already used by worktree at ...". Running `git worktree remove` while your cwd is inside that worktree leaves the shell with no working directory.
-- **Sequence:** commit in the worktree, run `COMMIT=$(git rev-parse HEAD)`, `cd` to the primary checkout, run `git merge --ff-only $COMMIT`, push, then `git worktree remove <path>` from the primary checkout.
+Sequence: commit in the worktree -> `COMMIT=$(git rev-parse HEAD)` -> `cd` to the primary checkout -> `git merge --ff-only $COMMIT` -> push -> `git worktree remove` from the primary checkout.
 
-## Commit Identity: Verify the Step That Publishes
+### Refresh a stale local ref before `git worktree add <existing-branch>`
+Creating a worktree with `-b <new-branch>` is always fresh. But rescuing an existing long-lived PR branch with `git worktree add /tmp/wt <existing-branch>` resolves the bare name to the **local** ref, which may be weeks behind `origin/<branch>` if every previous rescue worked in a worktree and pushed straight to origin. You then see phantom conflicts that were already resolved upstream, and a resolved push gets rejected as non-fast-forward after the work is done.
 
-- **Never pass an explicit personal email** (`-c user.email=...`). With email privacy on, GitHub rejects the push with `GH007: Your push would publish a private email address` or "push declined due to email privacy restrictions". It fails at **push** time, so a session that only checks the commit succeeded will report work that never landed.
-- Let git use the repo's configured identity, usually `<username>@users.noreply.github.com`. In an unfamiliar repo, run `git log -3 --format=%ae` to see which identity its history uses.
-- To recover a commit that was already made: `git -c user.email=<username>@users.noreply.github.com commit --amend --no-edit --reset-author`, then push again.
-- The rejection checks the **committer** email of every commit being pushed, not only the author. It follows the commits, so pushing from another machine doesn't help. Rewrite the identity on each affected commit.
+Before adding the worktree:
+```bash
+git rev-parse <branch> origin/<branch>        # must match
+git branch -f <branch> origin/<branch>        # if they differ
+```
+Forcing is safe here only because that ref is never checked out in the main checkout (which stays on the default branch).
 
 ## Remote Checkouts May Hold Commits That Exist Nowhere Else
 
-Before running `git pull` or `git reset` in a checkout you don't own (a server, a container, another machine), check whether it's **ahead** of origin:
+Before `git pull` or `git reset` in a checkout you don't own (a server, a container, another machine), check whether it is **ahead** of origin:
 
 ```bash
 git fetch origin <branch>
 git rev-list --count origin/<branch>..HEAD   # non-zero => LOCAL-ONLY commits live here
 ```
 
-A non-zero count means the checkout holds commits that may exist nowhere else, and `git reset --hard origin/<branch>` would destroy them for good. A `git pull` that conflicts is a *signal* to investigate, not an obstacle to force past.
+Non-zero means that checkout holds commits that may exist nowhere else, and `git reset --hard origin/<branch>` destroys them permanently. A conflicting `git pull` is a signal to investigate, not a nuisance to force past.
 
 When you find divergence:
 
-1. **Back it up before touching anything.** Run `git branch -f <name>-backup HEAD`, then `git bundle create /tmp/x.bundle <name>-backup`, and copy the bundle off the machine. A branch on one host isn't a backup. This costs nothing and makes every later step safe.
+1. **Back it up before touching anything.** `git branch -f <name>-backup HEAD`, then `git bundle create /tmp/x.bundle <name>-backup` and copy the bundle off the machine. A branch on a single host is not a backup.
 
-2. **Find out whether those commits hold unique content. Do NOT trust the commit subjects.**
+2. **Establish whether those commits contain unique content. Do NOT trust commit subjects.**
 
    ```bash
    git diff --stat origin/main..<backup-branch>     # net direction of the delta
@@ -191,18 +190,18 @@ When you find divergence:
    git diff origin/main..<backup-branch> -- src/ | grep -E "^\+[^+]"  # its unique source lines
    ```
 
-   Then check each feature the subjects claim **in the upstream tree**: `git grep -n "<feature>" origin/main -- src/`.
+   Then verify each feature the subjects claim **in the upstream tree**: `git grep -n "<feature>" origin/main -- src/`.
 
-   A branch can be "7 commits ahead" and still be strictly poorer. It may be early work that upstream later reimplemented properly through squashed or re-authored PRs, so the SHAs never match. Lesson: a checkout whose subjects promised atomic writes, scheduling, log rotation and alerting turned out to have zero unique files and a net diff of thousands of lines *removed*. Every claimed feature was present upstream in a better form. The reset was the correct call, and the first cautious read ("cherry-pick, never reset") was wrong.
+   A branch can be "7 commits ahead" and still be strictly poorer: early work that upstream later reimplemented properly, often via squashed or re-authored PRs whose SHAs never match. A net diff of a few hundred lines added against thousands removed, with zero files unique to the remote side, is the signature of a superseded fork.
 
-3. **Then choose based on that evidence:**
-   - *Superseded fork* (no unique content): `git reset --hard origin/<branch>`. This is safe when runtime state is gitignored. Check what the code actually writes (`output/`, `*.log`, caches) and confirm any tracked data file is read-only config, not state.
-   - *Genuinely unique content*: port it onto a branch off `origin/main`, commit under a valid identity, push, and only then reset the remote checkout. Don't leave the work stranded.
-   - *Need one fix now, reconcile later*: cherry-pick onto that checkout's HEAD (`git fetch origin main && git cherry-pick <sha>`). Conflicts are usually files that didn't exist on the older HEAD: `git add` the incoming version and `--continue`. This is a stopgap, not a resolution.
+3. **Choose on evidence:**
+   - *Superseded fork* (no unique content): `git reset --hard origin/<branch>`. Safe when runtime state is gitignored; check what the code actually writes (`output/`, `*.log`, caches) and confirm any tracked data file is read-only config, not state.
+   - *Genuinely unique content*: port it onto a branch off `origin/main`, commit under a valid author identity, push, and only then reset the remote checkout. Don't leave it stranded.
+   - *Need one fix now, reconcile later*: cherry-pick onto that checkout's HEAD (`git fetch origin main && git cherry-pick <sha>`). Conflicts are usually files that didn't exist on the older HEAD: `git add` the incoming version and `--continue`. This is interim, not an outcome.
 
-   Afterwards, run the repo's tests **on that host**. A big jump in test count is a good sign you recovered real work.
-4. **Record the outcome in that checkout's own `context.md`** (a warning if unresolved, a RESOLVED note if reconciled) and commit it there. Docs committed upstream are invisible to a checkout that's far behind, so the note has to live where the next session will read it.
-5. **Report the divergence as an open item.** Reconciling it is the owner's decision.
+   Run the repo's tests **on that host** afterwards. A big jump in test count is a good sign you recovered real work.
+4. **Record the outcome in that checkout's own `context.md`** (a warning if unresolved, a RESOLVED note if reconciled) and commit it there. Docs committed upstream are invisible to a checkout that is dozens of commits behind.
+5. **Surface the divergence as an open item.** Reconciling it is the owner's call.
 
 Restore from a bundle with:
 ```bash
@@ -211,11 +210,10 @@ git fetch /path/to/x.bundle <name>-backup:<name>-backup
 
 ## Untracked File Shadowing a Tracked Path: Use a Worktree, Never rm
 
-A repo can hold an UNTRACKED file at a path that IS tracked on origin/main. `git checkout -b <new> origin/main` then aborts with "untracked working tree files would be overwritten by checkout".
+A repo can hold an UNTRACKED file at a path that IS tracked on `origin/main` (common where automated sessions drop env or scratch files). `git checkout -b <new> origin/main` then aborts with "untracked working tree files would be overwritten by checkout".
 
-**Don't rm or mv the blocking file to get unblocked.** If you didn't create it, it may be someone else's uncommitted notes, and deleting it to land an unrelated commit destroys them.
+Do NOT `rm` or `mv` the blocker to unblock yourself. You didn't create it; it may be someone's uncommitted notes. Commit through a worktree, which never touches the dirty tree:
 
-Commit through a worktree instead, since it never touches the dirty tree:
 ```bash
 git worktree add /tmp/wt -b <branch> origin/main
 cp <file> /tmp/wt/<path> && cd /tmp/wt && git add <path>
@@ -224,114 +222,127 @@ git commit && git push -u origin <branch> && gh pr create
 cd <repo> && git worktree remove /tmp/wt --force && git worktree prune
 ```
 
-**If you moved the file aside anyway, the mv is only half the procedure.** The file is tracked on the branch you moved TO and untracked on the branch you came FROM, so `git checkout <original-branch>` DELETES it from the working tree. If you've already thrown away the backup, the file silently disappears. Required steps:
-1. Record `git status --short` BEFORE you start.
-2. After returning to the original branch, check the file still exists.
-3. If it's gone: restore your backup if it differed, else `git show origin/main:<file> > <file>`.
-4. Run `git status --short` again and confirm it matches step 1 exactly.
+**If you moved the blocker aside anyway, the mv is only half the procedure.** The file is tracked on the branch you moved TO and untracked on the branch you came FROM, so `git checkout <original-branch>` DELETES it from the working tree. If you already discarded your backup, it silently vanishes. Required steps whenever you mv a shadow file:
 
-Leaving the working tree different from how you found it is a silent side effect nobody asked for. Verify it; don't assume.
+1. Record `git status --short` BEFORE you start.
+2. After returning to the original branch, check the file exists.
+3. If gone: restore the backup if it differed, else `git show origin/main:<file> > <file>`.
+4. Re-run `git status --short` and confirm it matches step 1 exactly.
+
+Leaving the working tree different from how you found it is a side effect nobody asked for.
 
 ## The Shared Checkout May Host Another Live Agent Session
 
-One working tree can be edited by several agent sessions at the same time. Two failures come from assuming you own it:
+A single working tree can be edited by several agent sessions at once. Two failures come from assuming sole ownership:
 
-**1. `git checkout --` deletes another session's uncommitted work.** `git status` shows `M <file>` as a single entry, but the file can hold your one-line change *and* many lines of another session's unrelated, uncommitted work. Restoring the file wipes out both.
+**1. `git checkout --` can delete another session's uncommitted work.** `git status` shows `M <file>` as one flag for the whole file, but that file can hold your one-line change AND dozens of lines of someone else's uncommitted edits. Restoring it wipes both.
 
-> **Before `git checkout --` on any file in a shared tree, run `git diff <file>` and confirm every hunk is yours.** An `M` in `git status` is one flag for the whole file, not proof that you wrote all of it. If any hunk isn't yours, leave the file alone and work in a worktree.
+> **Before `git checkout -- <file>` in a shared tree, run `git diff <file>` and confirm every hunk is yours.** If any hunk isn't, leave the file alone and work in a worktree.
 
-**2. Another session commits YOUR uncommitted files under its own message.** An untracked file you created in the shared checkout can be `git add`-ed and pushed by a concurrent session. Your later push is then rejected as non-fast-forward, and the "conflicting" commit turns out to be byte-identical to your work. Anything uncommitted in a shared tree is fair game for another process running `git add`.
+**2. Another session can commit YOUR uncommitted files under its own message.** Anything untracked or modified in a shared tree is fair game for another process running `git add`. Your later push is then rejected as non-fast-forward, and the "conflicting" commit is byte-identical to your work.
 
-> **If another session may share the checkout, do the whole edit in `git worktree add /tmp/wt-<repo> <trunk>` from the start.** Never leave new files untracked in the shared tree.
+> **When another session may share the checkout, do the whole edit in `git worktree add /tmp/wt-<repo> <trunk>` from the start.** Never leave new files untracked in the shared tree.
 
-**Detect a concurrent session BEFORE your first edit, not at commit time:**
+**Detect a concurrent session BEFORE the first edit, not at commit time:**
 ```bash
 git branch --show-current     # an unexpected branch (e.g. claude/<something>)
 git reflog -5                 # checkouts or commits you did not make
 git worktree list             # worktrees you did not create
 git status --short            # record this; your final state must differ only by your files
 ```
-If any of these show another session, branch a worktree off trunk right away and never touch the shared tree. To reconcile afterwards: if the remote already has your content (`git diff HEAD origin/<branch> -- <paths>` is empty), don't force your duplicate commit. Reset to origin and commit only what's genuinely missing.
+If any of these show another session, branch a worktree off trunk immediately and never touch the shared tree. When reconciling afterwards: if the remote already has your content (`git diff HEAD origin/<branch> -- <paths>` is empty), don't force a duplicate commit; reset to origin and commit only what is genuinely missing.
 
 ### A peer's unpushed commit
+If an "unpushed work" gate blocks you because of a commit you didn't write:
 
-If a push gate or check flags unpushed commits, first confirm they're yours: `git log --format='%h %an %ad %s' @{u}..HEAD`. If the gate fires on a commit that contains a file *you* wrote, push it.
+- **If the authoring session is still live, wait.** They may be mid-turn and may still amend.
+- **If the commit is genuinely stranded** (the authoring session is gone and the work exists nowhere else), push it rather than leaving it:
+  1. Identify author and branch: `git log --format='%h %an %ad %s' @{u}..HEAD` and `git branch --show-current`. Confirm it isn't yours.
+  2. Secret-scan the diff. You're publishing content you didn't write or review; a private repo doesn't exempt it.
+  3. Push to the branch it was committed on: `git push origin HEAD:<that-branch>`. Never redirect a peer's commit to the default branch; that is a scope change you have no mandate for.
+  4. Say so in your final report.
+- **Never `git reset` a peer's commit to clear a gate.** That destroys work that exists nowhere else.
 
-If the commit belongs to another session:
-- **If that session is still live, wait.** It may be mid-turn and may still amend the commit.
-- **Only if the commit is genuinely stranded** (the authoring session is gone and the work exists nowhere else) should you publish it:
-  1. Identify the author and branch (`git branch --show-current`). Confirm the commit isn't yours before touching it.
-  2. **Secret-scan the diff** you're about to publish. You didn't write or review it, and a private repo doesn't exempt it.
-  3. **Push to the branch it was committed on**: `git push origin HEAD:<that-branch>`. Never redirect a peer's commit to the default branch. They chose that branch, and landing it on mainline is a scope change you have no mandate for.
-  4. **Say so in your final message.** You published someone else's work, and that belongs in the report.
-
-**Never `git reset` a peer's commit to clear a gate.** That destroys work that exists nowhere else. The same goes for any "acknowledge and skip" mechanism for dirty files: use it only after proving with `git diff <file>` that no hunk is yours and that your own content is already on the remote. Acknowledging work you simply forgot to push is exactly the failure such gates exist to catch.
+Gates that check for unpushed work should be per-commit: block only on commits containing files this session wrote, and name (but not block on) peers' commits.
 
 ## A PR Stuck CONFLICTING Is Invisible to Automation
 
-**`gh pr view N --json mergeable` returns `UNKNOWN` on the first poll.** GitHub computes mergeability lazily. The first read of a PR that hasn't been checked recently is usually `UNKNOWN`, and only a second read (about 6s later) returns the real `MERGEABLE` or `CONFLICTING`. A checker that trusts the first response sees nothing to act on and moves on, which is how conflicting PRs sit for days with no alert. **Anything that gates on mergeability must poll again.**
+**`gh pr view N --json mergeable` returns `UNKNOWN` on the first poll.** GitHub computes mergeability lazily; only a follow-up read (~6s later) returns the real `MERGEABLE` or `CONFLICTING`. A checker that reads the first response sees nothing actionable and moves on, which is how PRs sit blocked for days with zero alerts. **Anything gating on mergeability must re-poll.**
 
-Diagnosis order when a repo "seems behind":
-1. `git status`. A clean tree means it's almost never uncommitted work.
+Diagnosis order when a repo "seems behind on commits":
+1. `git status`: a clean tree means this is almost never uncommitted work.
 2. `gh pr list --state open`, then check each PR's mergeability **twice**.
 3. `git merge-tree --write-tree --name-only <default> <branch>` for a non-destructive trial merge.
 
-**Don't trust the legacy 3-arg `git merge-tree <base> <a> <b>`.** It can exit 0 with no conflict markers when a real merge does conflict. Use the `--write-tree` form above. If in doubt, do an actual trial merge in an isolated worktree: `git worktree add /tmp/x <branch> --detach && cd /tmp/x && git merge origin/main --no-commit --no-ff`.
-
-**Merge the default branch INTO the stale branch, never the other way.** A branch that's N commits behind will, if pushed onto the default branch, delete everything added there since it forked. Before committing a resolution, verify per file that nothing was lost. For append-only files this must print 0 against both parents:
+**Merge the default branch INTO the stale branch, never the reverse.** A branch N commits behind will, if pushed onto the default branch, delete everything added there since it forked. For append-only files, verify losslessness before committing a resolution; this must print 0 against both parents:
 
 ```bash
 comm -23 <(git show MERGE_HEAD:<file> | sort -u) <(sort -u <file>) | grep -c .
 ```
 
-Duplicate commit subjects with different SHAs on the two sides mean sessions have been cherry-picking around the block. Those duplicates are usually what caused the conflict.
+Duplicate commit subjects with different SHAs on the two sides are the tell that sessions have been cherry-picking around the block; those duplicates usually created the conflict.
 
-**Merging same-file PRs one at a time doesn't drain a backlog.** Each merge moves the default branch under the sibling PRs that touch the same file, so ones that were mergeable become conflicting. When N PRs edit the same hotspot file, merge them into a single integration branch, resolve the combined set once, and land that.
+**Merging same-file PRs one at a time does not drain a backlog.** Each merge moves the default branch under siblings that touch the same file, turning mergeable PRs into conflicting ones (a backlog can grow while you "clear" it). When N PRs edit the same hotspot file, merge them into one integration branch, resolve the combined set once, and land that.
 
-**Auto-resolve only what's provably safe.** A union resolver should refuse any hunk where both sides share a line rather than guess at deduplication, and it should never union a YAML frontmatter hunk (that produces duplicate keys).
+**Auto-resolve only what is provably safe.** A union resolver should refuse any hunk where both sides share a line rather than dedupe by guess, and must never union a YAML frontmatter hunk (it produces duplicate keys).
 
-### Rebasing an append-only log conflict: reinsert chronologically
+### Legacy 3-arg `git merge-tree` misses real conflicts
+`git merge-tree $(git merge-base A B) A B` (the legacy form) can exit 0 with no conflict markers while GitHub shows CONFLICTING and a real merge conflicts. Use the modern form (`git merge-tree --write-tree --name-only <default> <branch>`) or an actual trial merge in an isolated worktree:
+```bash
+git worktree add /tmp/x FETCH_HEAD --detach && cd /tmp/x && git merge origin/main --no-commit --no-ff
+```
 
-When the only conflict in a rebase is inside an append-only narrative log, the two blocks are usually independent entries from different dates, not competing edits. Resolving by keeping one block and tacking the other on at the conflict site leaves the log out of order: a long-open branch's entries are often OLDER than entries main gained after the branch diverged. Main may even contain later entries that reference the incoming content, so the correct position can be well outside the conflict markers.
+### Rebasing a conflict in an append-only log: reinsert chronologically
+When the only conflict is inside an append-only narrative log (run logs, progress files), the two blocks are usually independent entries from different dates, not competing edits. Tacking the incoming block on at the conflict site puts it out of order, because a long-open branch's entries are often OLDER than what main gained since. Read each block's date or run header, move it to where it belongs chronologically (which may be well outside the conflict region, for example right before the first later entry that references it), then verify the file's date headers are monotonic.
 
-**Fix:** read each block's date or run-number header, move the block to where it belongs chronologically, then grep the file's entry headers and confirm they're in monotonic order. Also grep for cross-references to the incoming content and confirm they now come after the entry they point to.
+### A failing CI check is not automatically a merge blocker
+If a PR shows `mergeStateStatus=UNSTABLE` because a check failed, inspect the failure (`gh run view <id> --log-failed`) and compare the failing files against the PR's file list. If the same failure reproduces on a fresh checkout of the base branch with no PR changes, it predates the PR and should not veto an otherwise-eligible merge. Your other merge criteria (verification passed, MERGEABLE, no sensitive paths) still govern.
 
-## Run-Numbered Branch Name Collisions
+## Commit Identity: Use the Noreply Email
 
-A branch is named after the run that *created* it. A later run that reuses the same numeric stem can collide with it. You'll see `git worktree add ... -b <branch>` fail with "already exists", or worse, a local ref that points somewhere old.
+With GitHub email privacy on, committing with a personal address as author or committer makes the push fail with `remote: error: GH007: Your push would publish a private email address` (or "push declined due to email privacy restrictions"). The failure happens at **push** time, so a session that only checks the commit succeeded will report work that never landed.
 
-**Before creating any run-numbered branch, check both:**
-1. `git branch -a | grep <branch>` catches a local ref.
-2. `gh pr list --repo <owner>/<repo> --head <branch> --state all` catches a branch that was squash-merged and deleted but whose name is being reused.
+- Never pass an explicit email via `-c user.email=...`. Let git use the repo's configured identity.
+- In an unfamiliar repo, check `git log -3 --format=%ae` to see which identity history already uses.
+- Recover an already-made commit: `git -c user.email=<username>@users.noreply.github.com commit --amend --no-edit --reset-author`, then re-push.
+- GitHub checks the **committer** email of every replayed commit, not just the author, so the rejection follows the commits: pushing from another machine doesn't help.
 
-`git merge-base --is-ancestor origin/<branch> origin/main` returns false for a squash-merged branch, so it can't tell "merged" apart from "exists and diverged". The `gh pr list --state all` check is the reliable one.
-
-**If you find a collision, add a suffix** (`<branch>-2`) rather than deleting refs or digging through squash history under time pressure.
+General rule: verify the operation that actually publishes, not the local step before it.
 
 ## Discrimination Checks: `git stash push` a Directory, Never `git checkout` It
 
-To prove a regression test really discriminates, you revert the fix, rerun the suite, and expect failures. Reverting with `git checkout -- <dir>` DESTROYS an uncommitted fix. Working-tree files have no reflog, so the only way back is re-applying every edit by hand.
+To prove a regression test discriminates, you revert the fix, rerun the suite, and expect failures. Reverting with `git checkout -- <dir>` DESTROYS an uncommitted fix; there is no reflog for working-tree files, so recovery means re-applying every edit by hand.
 
-Use `git stash push -- <dir>` instead. It reverts just as cleanly, and `git stash pop` restores the work exactly. It's safe whether or not the fix is committed, so make it the default.
+Use `git stash push -- <dir>` instead: same clean revert, and `git stash pop` restores the work exactly. It's safe whether or not the fix is committed, so make it the default.
 
-For a branch where part of the fix is committed:
+For a partially-committed branch:
 ```bash
 git stash push -- src/            # save uncommitted part
 git checkout <base-sha> -- src/   # revert the committed part
-# run suite, record failures
+<run suite, record failures>
 git checkout HEAD -- src/         # restore committed part
 git stash pop                     # restore uncommitted part
 ```
 
-## Scanning Hooks and Rewritten History: Check the Diff Range
+## Secret Scanners Can Diff the Wrong Range After a Merge or Rebase
 
-Sensitive-identifier hooks can report false positives in bulk after merges and rebases, because they scan the wrong range:
+Pre-commit and pre-push scanners that compute their diff naively produce floods of false positives on stale branches:
 
-- **Pre-commit on a merge commit:** `git diff --cached` with no base diffs against the pre-merge HEAD (the stale branch's tip), not the merge-base. All of main's already-approved content gets flagged as new. The hook fix is to use `$(git merge-base HEAD MERGE_HEAD)` as the diff base when `MERGE_HEAD` exists.
-- **Pre-push after a rebase:** the hook scans `$REMOTE_SHA..$LOCAL_SHA`, where `$REMOTE_SHA` is the stale, pre-rebase remote tip. Rebasing rewrote history, so that ref is no longer an ancestor, and the range spans all of main's landed commits.
+- **Pre-commit on a merge commit:** `git diff --cached` with no extra args diffs against the **pre-merge HEAD** (the stale branch tip), so all of main's already-approved content is re-flagged as new. Fix in the hook: when `MERGE_HEAD` exists, diff against `$(git merge-base HEAD MERGE_HEAD)`.
+- **Pre-push after a rebase:** the hook scans `$REMOTE_SHA..$LOCAL_SHA`, where `$REMOTE_SHA` is the stale pre-rebase tip. After a rebase it is no longer an ancestor, so the range spans all of main's landed commits.
 
-**What to do:**
-- **Don't use `--no-verify`.** Bypassing the scanner for one merge turns off the last line of leak defense.
-- Re-scan the correct range yourself to isolate genuine hits: `git diff origin/main..HEAD | grep '^+' | grep -v '^+++'`, piped into your scanner. If hits remain, check whether they're already present verbatim on main.
-- If the hook can't be fixed right away, commit new content onto a branch without merging main locally, and resolve conflicts through the hosting platform's UI.
-- **Hooks are copies in each clone's `.git/hooks`** (and in `init.templateDir` if you use one). Editing the source changes nothing until you reinstall the hooks everywhere. After a hook fix, verify by grepping the *installed* copies for a marker from the new code, not by reading the source.
+Before concluding you're blocked on new content, re-scan the correct range yourself:
+```bash
+git diff origin/main..HEAD | grep '^+' | grep -v '^+++' | <your-scanner>
+```
+If the remaining hits are verbatim in `origin/main` or in the original branch tip, they are pre-existing, not yours. **Still do not use `--no-verify`.** Options: commit new content onto a fresh branch off main instead of merging the stale one, or leave the push for the owner to resolve. If the scanner hook is installed as copies in every repo (for example via `init.templateDir`), fixing the source changes nothing until you reinstall it everywhere; verify by grepping the installed copies for a marker from the new code.
+
+## Run-Numbered Branch Names Can Collide
+
+When automation names branches after a run number (e.g. `claude/learnings-<N>`), a later run can reuse a stem that already exists or was already squash-merged. `git merge-base --is-ancestor origin/<branch> origin/main` returns false for a squash-merged branch, so it can't distinguish "merged" from "exists and diverged".
+
+Before creating a run-numbered branch, check both:
+1. `git branch -a | grep <branch>`: catches a local ref.
+2. `gh pr list --repo <owner>/<repo> --head <branch> --state all`: catches a squash-merged branch whose ref was deleted.
+
+On a collision, append a suffix (`<branch>-2`) rather than deleting refs or investigating squash history under time pressure. The suffix is always safe.

@@ -1,18 +1,18 @@
 <!-- Load when: spawned processes, temp files, port conflicts -->
 # Process Hygiene
 
-Track what you start. Clean up what you leave behind.
+Keep track of every process you start, and clean up whatever you leave behind.
 
 ## Track What You Start
 
-If you spawn a long-running process (`npm run dev`, a background build, a watch command, a test runner in watch mode), you own it for the duration of your session.
+If you spawn a long-running process, you own it for the whole session. That includes `npm run dev`, a background build, a watch command and a test runner in watch mode.
 
-- **Record the PID or process name** when you start something. You'll need it to stop it later.
-- **Stop it before session end**, or document it in `context.md` so the next session knows it's running.
-- **Don't assume your process manager will manage it.** Only processes in `ecosystem.config.cjs` (or equivalent) are managed. Anything you start with `node`, `npm run dev`, or `&` is orphaned when your session ends.
+- **Record the PID or process name** when you start it. You will need it to stop the process later.
+- **Stop it before the session ends**, or record it in `context.md` so the next session knows it is running.
+- **Don't assume your process manager will look after it.** PM2 (or an equivalent) only manages processes listed in `ecosystem.config.cjs` or its equivalent. Anything you start with `node`, `npm run dev` or `&` becomes an orphan when your session ends.
 
 ```bash
-# Start a dev server, note the PID
+# Start a dev server: note the PID
 npm run dev &
 DEV_PID=$!
 echo "Dev server running on PID $DEV_PID"
@@ -23,21 +23,21 @@ kill $DEV_PID
 
 ## Atomic State Writes
 
-When updating `context.md` or `progress.md`, treat the update as its own operation. Don't leave it as the last step in a chain that might not complete.
+Treat an update to `context.md` or `progress.md` as a separate operation. Don't make it the last step of a chain that might not finish.
 
-- **Update context files early and often**, not just at session end
-- **Commit the context update with the work it describes**, in the same commit
-- If you're about to do something risky (a build, a deploy, a large refactor), update `context.md` *before* the risky step so that if it crashes, the state is captured
+- **Update context files early and often**, not only at the end of the session.
+- **Commit the context update in the same commit** as the work it describes.
+- Before a risky step (a build, a deploy, a large refactor), **update `context.md` first**. If the step crashes, the state is already recorded.
 
 ## Temp File Cleanup
 
-- Don't leave temp files in `/tmp`, project directories, or anywhere else
-- If you create scratch files during debugging (`test.js`, `debug.log`, `temp.json`), delete them before committing
-- If a process creates temp files (detached job output, build artifacts), clean them up or document their location
+- Don't leave temp files in `/tmp`, in project directories, or anywhere else.
+- If you create scratch files while debugging (`test.js`, `debug.log`, `temp.json`), delete them before you commit.
+- If a process creates temp files (output from a detached job, build artifacts), clean them up or write down where they are.
 
 ## Port and Process Conflicts
 
-Before starting any server or service:
+Before you start any server or service:
 
 ```bash
 # Is the port already in use?
@@ -48,19 +48,21 @@ ps aux | grep <process-name>
 pm2 list
 ```
 
-Don't blindly start a service on a port that's occupied. Either stop the existing process (if it's yours) or use a different port. If the existing process belongs to another session, coordinate; don't kill it.
+Never start a service on a port that is already taken. Either stop the existing process (if you started it) or pick another port. If the process belongs to another session, coordinate with it; don't kill it.
 
 ### PM2 Restart EADDRINUSE Crash Loop
 
-When PM2 restarts a process, the old Node instance may not release its port before the new one starts, causing `EADDRINUSE`, then a crash, then a PM2 restart, and repeat.
+When PM2 restarts a process, the old Node instance may still hold the port when the new one starts. The result is a loop: `EADDRINUSE`, crash, PM2 restart, repeat.
+
+**Diagnosis:** `pm2 show <process>` shows the restart count climbing fast, and the logs contain `EADDRINUSE`.
 
 **Three-layer fix:**
 
-1. **`kill_timeout` and `listen_timeout` in ecosystem.config:**
+1. **Set `kill_timeout` and `listen_timeout` in the ecosystem config:**
    ```js
    { kill_timeout: 3000, listen_timeout: 3000 }
    ```
-2. **Graceful shutdown handler in server code.** Handle both SIGINT and SIGTERM, close DB connections inside the `server.close()` callback, add a force-exit fallback, and register global error handlers:
+2. **Add a graceful shutdown handler to the server code.** Handle both SIGINT and SIGTERM, close DB connections inside the `server.close()` callback, add a force-exit fallback, and register global error handlers:
    ```js
    function shutdown() {
      server.close(() => {
@@ -76,11 +78,11 @@ When PM2 restarts a process, the old Node instance may not release its port befo
    process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
    process.on('uncaughtException', (err) => { console.error('Uncaught Exception:', err); setTimeout(() => process.exit(1), 100); });
    ```
-   - SIGINT handles Ctrl-C in dev, SIGTERM handles PM2 restart. Both are needed.
-   - Close the DB (and any other resource) inside the `server.close()` callback, not after it. This ensures the SQLite WAL is flushed and connections are released before the process exits, preventing `SQLITE_BUSY` or "database is locked" on the next start.
-   - The force-exit prevents PM2 from hanging on keep-alive connections that never drain.
-   - `unhandledRejection`/`uncaughtException` log before exiting; without these, PM2 sees a silent crash with no diagnostic output.
-3. **Use a `start.sh` wrapper for Next.js standalone.** `next start` as the PM2 script loses process tracking. A wrapper lets PM2 signal the actual node process:
+   - You need both signals: SIGINT covers Ctrl-C in development, and SIGTERM covers a PM2 restart.
+   - Close the DB (and any other resource) inside the `server.close()` callback, not after it. That way the SQLite WAL is flushed and connections are released before the process exits, which prevents `SQLITE_BUSY` or "database is locked" on the next start.
+   - The force-exit stops PM2 from hanging on keep-alive connections that never drain.
+   - The `unhandledRejection` and `uncaughtException` handlers log before the process exits. Without them, PM2 sees a silent crash with no diagnostic output.
+3. **Use a `start.sh` wrapper for Next.js standalone.** If `next start` is the PM2 script, PM2 loses track of the real process. A wrapper lets PM2 signal the actual node process:
    ```bash
    #!/bin/bash
    set -e
@@ -93,11 +95,9 @@ When PM2 restarts a process, the old Node instance may not release its port befo
    fi
    exec node "$(dirname "$0")/.next/standalone/server.js"
    ```
-   - The build script must use `mkdir -p .next/standalone/.next` before `rm -rf .next/standalone/.next/static`; on a fresh clone the directory doesn't exist and `cp` will fail silently. Correct form: `next build && mkdir -p .next/standalone/.next && rm -rf .next/standalone/.next/static && cp -r .next/static .next/standalone/.next/static`
+   - The build script must run `mkdir -p .next/standalone/.next` before `rm -rf .next/standalone/.next/static`. On a fresh clone that directory doesn't exist, and `cp` fails silently. The correct form: `next build && mkdir -p .next/standalone/.next && rm -rf .next/standalone/.next/static && cp -r .next/static .next/standalone/.next/static`
 
-**Diagnosis:** `pm2 show <process>` with a rapidly increasing restart count plus `EADDRINUSE` in the logs means this pattern.
-
-**Belt-and-suspenders: proactive port cleanup in start.sh.** When `kill_timeout` alone isn't enough (e.g., a previous process crashed without releasing the socket), add a `kill_port()` function at the top of `start.sh` that clears the port before launching:
+**Belt-and-suspenders: clear the port in start.sh first.** `kill_timeout` alone may not be enough, for example when a previous process crashed without releasing the socket. In that case, add a `kill_port()` function at the top of `start.sh` that frees the port before launch:
 
 ```bash
 kill_port() {
@@ -118,9 +118,9 @@ for i in {1..5}; do
 done
 ```
 
-Start with SIGTERM (graceful), and escalate to SIGKILL only after several retries. Use `fuser` when available (util-linux); fall back to `lsof` (macOS or minimal Linux). This is a start.sh-level fix, not a replacement for the ecosystem.config `kill_timeout`.
+Send SIGTERM first so the process can shut down cleanly, and escalate to SIGKILL only after several retries. Use `fuser` when it's available (util-linux) and fall back to `lsof` (macOS or minimal Linux). This works alongside `kill_timeout` in the ecosystem config; it doesn't replace it.
 
-**App-level retry loop in `server.listen()`.** When the above layers still aren't enough (the OS hasn't released the socket despite `kill_timeout`, graceful shutdown, and a proactive kill), wrap `app.listen()` in a retry loop instead of exiting immediately:
+**App-level retry loop in `server.listen()`.** Sometimes all of the layers above are in place and `EADDRINUSE` still shows up now and then, because the OS hasn't released the socket yet. In that case, wrap `app.listen()` in a retry loop instead of exiting on the first failure:
 
 ```js
 function startServer(retries = 5) {
@@ -142,105 +142,120 @@ function startServer(retries = 5) {
 const server = startServer();
 ```
 
-- Only retry on `EADDRINUSE`; hard-exit on all other errors.
+- Retry only on `EADDRINUSE`. Exit hard on every other error.
 - The 2s delay gives the OS time to release the port between attempts.
-- An app-level retry has eliminated intermittent crash loops even where all the other layers were already in place.
 
-**Client-side companion: also retry `ECONNREFUSED`.** A worker or client process that starts before its server is fully bound gets `ECONNREFUSED`, not `EADDRINUSE`. Include `ECONNREFUSED` in the retryable error set alongside network errors (`EAI_AGAIN`, `ECONNRESET`, `ETIMEDOUT`). This handles the startup race where server and client launch concurrently (e.g., PM2 starts both in rapid succession).
+**Client side: also retry `ECONNREFUSED`.** A worker or client that starts before its server has bound the port gets `ECONNREFUSED`, not `EADDRINUSE`. Add `ECONNREFUSED` to the retryable errors next to the network errors (`EAI_AGAIN`, `ECONNRESET`, `ETIMEDOUT`). This covers the startup race when the server and client launch together, for example when PM2 starts both in quick succession.
 
 ### PM2 `cron_restart` Does Not Reliably Fire for Batch Jobs
 
-PM2's `cron_restart` with `autorestart: false` does not reliably reawaken a batch script that exits normally after doing its work. The script exits, PM2 marks it "stopped", and on some deployments the cron silently never fires again. A job can go dark for days with no error and no alert.
+Combining `cron_restart` with `autorestart: false` is supposed to re-run a batch script on a schedule. On some deployments it does not. The script finishes normally, PM2 marks it "stopped", and the cron never fires again. There is no error and no alert, so a scheduled job can stay silently dead for days.
 
-**Fix:** For any run-once, batch, or cron-style PM2 process (digest posters, scrapers, daily scripts), use the system crontab calling `pm2 restart <name> --update-env` as the primary scheduler. Keep `cron_restart` in `ecosystem.config.js` only as documentation, not as the sole mechanism.
-
-```cron
-0 7 * * * /usr/bin/env pm2 restart my-batch-job --update-env >> $HOME/logs/my-batch-job.cron.log 2>&1
-```
+**Fix:** For any run-once, batch or cron-style PM2 process (digest posters, scrapers, daily scripts), make the system crontab the primary scheduler and have it call `pm2 restart <name> --update-env`. Keep `cron_restart` in `ecosystem.config.js` only as documentation, never as the only trigger.
 
 ## Cleanup Checklist (Before Session End)
 
-1. **Processes:** Stop any dev servers, watch commands, or background tasks you started
-2. **Temp files:** Delete any scratch files you created
-3. **Ports:** Verify you haven't left a rogue server bound to a port
-4. **Git state:** No uncommitted changes related to your task
-5. **Context:** `context.md` reflects what's running and what's not
+1. **Processes:** Stop any dev servers, watch commands or background tasks you started.
+2. **Temp files:** Delete any scratch files you created.
+3. **Ports:** Confirm you haven't left a server bound to a port.
+4. **Git state:** Leave no uncommitted changes related to your task.
+5. **Context:** Make sure `context.md` says what is running and what isn't.
 
 ## Rule Digest
 
-One line per lesson. Each is a rule learned from a real silent failure.
+One line per lesson. When a line applies to what you are doing, follow it.
 
-- **Docker bind mount refresh**: Use `docker compose down && docker compose up -d` instead of `docker compose restart` for anything that needs the container to pick up updated host files.
-- **Docker `exec` always needs `--user`**: When a container runs a non-root application user (e.g. `node`), pass `--user <username>` on every `docker exec`, or files get created as root and the app can't touch them.
-- **PM2 lifecycle traps**: Several PM2 behaviors around restarts, stops and monitoring each cause silent failures; when a PM2 service misbehaves around restarts, check config reload, durability of stop, crash loops and cron behavior (all below).
-- **Long text transfer**: Never give the user long commands, URLs, or multi-line text to copy-paste manually; write it to a file or host it and hand over a short command.
-- **Stale git lock files**: Any automated script that runs git commands should check for and remove stale `.git/*.lock` files (with no live git process) before operating.
-- **Stale branch dedup lists**: Automated agents that gate new work on a dedup list built from `git log` or `git branch -r` can block or act on stale data; fetch and prune first.
-- **Bash `set -u` with optional parameters**: Use `${N:-}` (empty default) or `${N:-default}` for any positional parameter that may not be passed.
-- **Bash `${VAR:-default}` vs `${VAR-default}`**: `${VAR:-default}` substitutes the default if `VAR` is unset OR empty; use `${VAR-default}` if an explicit empty value must be preserved.
-- **Python `smtplib`: validate addresses before sending**: Guard every send with a basic address sanity check.
-- **`pm2 restart <name>` does NOT pick up ecosystem config changes**: It reuses the in-memory config. Use `pm2 delete <name> && pm2 start ecosystem.config.js --only <name>` (or `pm2 reload ecosystem.config.js`).
-- **PM2 crash loops from DB dependency on startup**: Services that connect to Postgres (or any external DB) at module load can tight-loop on boot if the DB isn't ready; connect lazily with retry and backoff.
-- **Bash `date +%H` is octal-invalid in arithmetic**: `08` and `09` break `$(( ))`; use `$((10#$(date +%H)))` or `date +%-H`.
-- **`WebFetch`-style tools route through a remote edge, not your local network**: Use `curl` from the shell for private or local URLs.
-- **Generated crontabs**: If your crontab is generated from a registry file, edit the registry and regenerate; hand edits to the live crontab are overwritten and drift.
-- **Bash `set -e` kills error handlers before they fire**: In `set -e` or `set -euo pipefail` scripts, capture exit codes inline with `cmd || VAR=$?`.
-- **Bash `git stash pop` must be guarded**: Never call `git stash pop` unconditionally in a script; only pop if the stash step actually created an entry.
-- **PM2 periodic-exit scripts use `autorestart: false` with `cron_restart`**: For any process that exits on completion, pair `cron_restart` with `autorestart: false`, or it restarts in a tight loop (and back it with system cron, see above).
-- **Cron wrappers on remote machines self-sync**: Scripts running on hosts without a deploy pipeline should `git pull --ff-only` at the start of each run.
-- **`claude -p` vs `claude --print` positional trap**: In scripts that pipe stdin to `claude`, use `--print` (not `-p`) whenever other flags follow.
-- **ID-based cursor iteration for large datasets**: Paginate with `WHERE id > ? ORDER BY id LIMIT N`, not `LIMIT N OFFSET M`.
-- **Resilient DB JSON parsing**: Wrap every `JSON.parse()` of a stored JSON column in `try/catch`.
-- **Confirm async follow-through, not just dispatch**: Any runner that creates a PR, ticket, or artifact for later pickup should, at the START of its next run, reconcile its own prior outputs rather than trusting a downstream janitor.
-- **Gemini CLI `-p` does NOT support multimodal input**: In headless mode `@filepath` references to video or images are treated as text only.
-- **Chokidar denylist: segment vs substring matching**: The `ignored` function receives the full path; match path segments, not substrings, or you'll ignore far more (or less) than intended.
-- **Bash `$HOSTNAME` is always set**: Never use `${HOSTNAME:-default}` as a bind-address guard; it never falls through.
-- **SQLite `.iterate()` cleanup and watcher depth limiting**: Wrap `.iterate()` in `try/finally` so the cursor always closes, and set a `depth` limit on file watchers.
-- **Background queue saturation guards for webhook handlers**: Track pending fire-and-forget tasks and return HTTP 503 when a cap is exceeded.
-- **SQLite `createMany` variable limit and webhook timestamp validation**: SQLite limits bind parameters per statement (about 999 on older builds, up to 32766 on recent ones); chunk bulk inserts, and reject webhooks with stale or missing timestamps.
-- **Express API routes: null-check after insert, try/catch everywhere**: A DB read right after a write can return null; wrap every route handler in `try/catch`; guard nullable columns with `!== undefined` rather than `||`.
-- **Claude CLI `--model` alias vs SDK model ID**: The CLI's `--model` flag takes short aliases, not API model IDs; verify the model that actually served the request, not the flag you passed.
-- **Health endpoint: data pipeline freshness gate**: `/health` should check not only DB connectivity but whether background sync jobs have written recently.
-- **V8 object nullification in batch functions**: Large objects in scope until a function returns may not be collected; scope them tightly (smaller helper functions) in long batch runs.
-- **File-watcher feedback loop**: A service that watches a directory and writes into it must explicitly exclude its own output files.
-- **`Promise.race` timeout leaves a dangling timer**: `clearTimeout` in a `finally` once the race settles.
-- **Defensive JSON parsing in batch/summarization loops**: If the cursor advances only after the loop, one bare `JSON.parse` failure stalls the pipeline forever; parse per item inside `try/catch`.
-- **SQLite `busy_timeout` alongside WAL**: WAL alone doesn't prevent `SQLITE_BUSY`; also set `PRAGMA busy_timeout = 5000` (or similar).
-- **PrismaClient with the LibSQL adapter**: Don't pass `datasourceUrl` in the constructor; the adapter owns the connection.
-- **Bash monitoring: alert-once-then-suppress via marker state**: The marker must encode whether an alert was already sent, not just that a failure occurred; clear it on recovery.
-- **External API 429 handling**: Use exponential backoff on 429 plus a fixed inter-request throttle in sequential loops.
-- **Express: `URLSearchParams(req.query)` drops repeated params**: Iterate explicitly and `.append()` each value.
-- **OAuth bootstrap: a copied token gets revoked on source rotation**: Copying a refresh token from one container to another makes them share it; when either rotates, the other is revoked. Authenticate each consumer independently.
-- **SQLite UPSERT with optional columns**: Branch on whether the optional field was provided and use a separate prepared statement per case, so an absent value doesn't overwrite existing data with null.
-- **SQLite corruption auto-detect and restore**: Run `PRAGMA quick_check` at startup and auto-restore from backup when it fails (power loss, OOM kills mid-write, and disk errors all cause corruption).
-- **Multi-pass AI generation: editor commentary placement**: A refinement pass leads with meta-commentary unless told not to; instruct it explicitly to put any editor notes at the bottom.
-- **Strip narration from both ends**: When post-processing model output, remove trailing editor notes as well as leading narration, gated on the notes heading being the last heading in the document.
-- **Webhook queue: array-based queue over promise chains**: For bursty events processed sequentially with I/O, use an explicit array queue and a single worker loop instead of an ever-growing promise chain.
-- **Multi-phase AI research pipeline with disqualification gates**: Structure research/recommendation agents as sequential phases that narrow candidates and apply hard disqualifiers before deepening research.
-- **`for...of`: don't assign to a `const` loop variable**: It throws and can crash-loop a service; use `let`. Nulling a loop variable "to help GC" is cargo-cult code.
-- **Slug guard**: When converting a string to a slug for a URL path segment, return `[]` (or reject) when the derived slug is empty.
-- **Shell script network calls: always set timeouts**: Unattended scripts must use `curl --max-time` and `ssh -o ConnectTimeout=...`, or a slow host hangs them indefinitely.
-- **Client-side storage schema validation**: Validate the shape of anything loaded from `localStorage`/`sessionStorage` and fall back to defaults on mismatch.
-- **Required-field validation in user-authored config parsers**: Never access required keys by raw indexing (`d["type"]` gives a cryptic `KeyError`); validate and emit a message naming the file and missing field.
-- **Autonomous agent repos: gitignore runtime state files**: Anything the loop writes at runtime must be gitignored.
-- **Bare `JSON.parse` inside `.map()` over DB rows is a crash vector**: One bad row kills the whole response; parse per row with a guard.
-- **String normalization output guard**: `slugify()`-style functions can return `''` or `['']` for empty or whitespace input; check the output, not just the input.
-- **Verify free tiers before depending on them**: CLI free tiers get deprecated; confirm the tier is still live before building on it.
-- **Codex CLI gotchas**: Keep the CLI up to date (stale versions silently break all models); the vision `-i` flag is variadic, so pass the prompt via stdin; `codex exec` echoes the prompt in its output, so don't assert on substrings of it in tests.
-- **WSL overnight scheduling**: A wake timer requires sleep, not shutdown; put the machine to sleep before an overnight run.
-- **Custom skill source of truth**: Keep skills in a repo and edit there first, then sync to the live copy; edits to the live copy get overwritten.
-- **Cron PATH double trap**: Prepend both the `claude` and `node` bin directories at the top of any cron-invoked script.
-- **Per-item failure isolation in batch loops**: Wrap each iteration in `try/catch` so one bad record doesn't abort the whole batch; log and count failures.
-- **PM2 stop is not durable against deploy-path restarts**: `pm2 stop` plus `pm2 save` does not keep an app stopped if a deploy script restarts it; remove it from the ecosystem file or `pm2 delete` it.
-- **Cron script failure alerting**: Add an EXIT trap that sends an alert (via a shared helper) on non-zero exit; silent cron failures are the top cause of auth expiry going unnoticed for days.
-- **Suspending an autonomous agent: full checklist**: Stopping the process is not enough; also remove it from the ecosystem file, disable its cron entries and any deploy-path restarts, and record the suspension in `context.md`.
-- **Cron jobs that invoke `claude` must use an absolute binary path**: Cron's minimal PATH (`/usr/bin:/bin`) doesn't include `/usr/local/bin`.
-- **Parallel Bash calls race on persisted shell cwd**: Always `cd` with an absolute path explicitly, or use absolute paths throughout.
-- **Follow-mode log commands piped into `head` leak a process forever**: `pm2 logs`/`tail -f` piped into something that exits early keeps running; use a non-follow flag (`--nostream`, `tail -n`) or wrap in `timeout`.
-- **A data column used as a state machine makes failures invisible to recovery**: If a status column has no explicit failed state and timestamp, stuck rows are never retried; model failure states explicitly.
-- **A generator that claims to be the source of truth for a live config is dangerous once it drifts**: Diff the generated output against the live config before installing, and refuse to overwrite on unexplained differences.
-- **Next.js standalone build in a git worktree**: The server nests under `.next/standalone/<path-from-repo-root>`; don't hardcode `.next/standalone/server.js` in worktree builds.
-- **A collapsed `<details>` still mounts and parses all its children**: Lazy-mount heavy content on open.
-- **Module-level `process.env` reads bake in defaults before `dotenv.config()` runs (ES modules)**: Read env vars at call time, or load dotenv first via `import 'dotenv/config'` as the very first import in the entrypoint.
-- **Node `fetch` (undici) default `headersTimeout` cuts slow non-streaming backends**: The default is about 300 seconds; for backends that send headers only after computing the whole body, pass a custom dispatcher with a longer `headersTimeout`, or stream.
-- **`pkill`/`pgrep -f` also match the shell whose command line contains the pattern**: Use a pattern that can't match itself (e.g. `pgrep -f '[m]y-server'`) or match by PID file.
+### Containers and process managers
+
+- **Docker bind mount refresh:** If a container needs to pick up updated host files, use `docker compose down && docker compose up -d`, not `docker compose restart`.
+- **`docker exec` always needs `--user`:** If a container runs as a non-root application user, pass `--user <username>` on every `docker exec` call. Otherwise, files it creates end up owned by root.
+- **`pm2 restart <name>` ignores ecosystem config changes:** It restarts with the config held in memory. After editing `ecosystem.config.js`, run `pm2 delete <name> && pm2 start ecosystem.config.js --only <name>` (or `pm2 startOrReload`), then `pm2 save`.
+- **PM2 crash loops from a DB dependency at startup:** A service that connects to Postgres (or any external DB) when its module loads can crash-loop if the DB isn't ready on first boot or after a reboot. Retry the connection with backoff instead of exiting.
+- **PM2 periodic-exit scripts:** Any PM2 process that exits when it finishes (sync jobs, data pushes, batch processors) must pair `cron_restart` with `autorestart: false`, or PM2 re-runs it in a tight loop. For reliable scheduling, see the crontab rule above.
+- **`pm2 stop` does not last through deploys:** `pm2 stop <app>` plus `pm2 save` doesn't keep an app stopped. A later deploy or `pm2 start ecosystem.config.js` brings it back. To disable an app, remove it from the ecosystem file (or `pm2 delete` it) and check every deploy path.
+- **Suspending an autonomous agent takes more than stopping it:** Also remove it from the ecosystem file, delete its crontab entries, run `pm2 save`, and make sure no deploy script or watchdog restarts it.
+
+### Shell scripting
+
+- **Long text transfer:** Never give the user long commands, URLs or multi-line text to copy and paste by hand. Write it to a file or put it somewhere they can fetch it.
+- **Stale git lock files:** Any automated script that runs git should check for stale `.git/*.lock` files and remove them before it starts. Remove a lock only after confirming that no git process owns it.
+- **Stale branch dedup lists:** An agent that decides whether to start new work using a dedup list built from `git log` or `git branch -r` may be reading stale data. Run `git fetch --prune` first.
+- **`set -u` with optional parameters:** Write `${N:-}` or `${N:-default}` for any positional parameter that may not be passed.
+- **`${VAR:-default}` vs `${VAR-default}`:** `:-` substitutes the default when `VAR` is unset **or empty**. `-` substitutes it only when `VAR` is unset. Pick the one you mean.
+- **`date +%H` in arithmetic:** The output is zero-padded (`08`, `09`), and bash reads a leading zero as octal. Force base 10 with `$((10#$(date +%H)))`.
+- **`set -e` kills error handlers before they run:** In a `set -e` or `set -euo pipefail` script, capture exit codes inline with `cmd || VAR=$?`.
+- **Guard `git stash pop`:** Never call it unconditionally in a script. Pop only if a stash was actually created, which you can tell by comparing `git stash list` before and after.
+- **Scripts need timeouts on `curl` and `ssh`:** Without them, an unattended script hangs forever when the remote host is slow or unreachable. Use `curl --max-time` and `ssh -o ConnectTimeout=`.
+- **`$HOSTNAME` is always set in bash:** `${HOSTNAME:-default}` never falls back. Don't use it as a bind-address guard; use a dedicated variable.
+- **Parallel Bash calls race on the persisted cwd:** When tool calls run in parallel, always `cd` to an absolute path explicitly in each call.
+- **Follow-mode logs piped into `head` leak a process:** `tail -f ... | head` or `pm2 logs ... | head` leaves a shell running forever. Use a non-following form, such as `--nostream` or `--lines N` without follow.
+- **`pkill -f` / `pgrep -f` match their own shell:** A pattern can also match the shell whose command line contains that pattern, so the script kills itself. Anchor the pattern, or filter out your own PID.
+
+### Cron and scheduling
+
+- **Cron PATH trap:** Cron runs with a minimal PATH (`/usr/bin:/bin`). At the top of any script cron calls, prepend the bin directories for every tool it needs (for example `claude` and `node`).
+- **Use an absolute binary path for `claude` in cron:** The global install is often in `/usr/local/bin` or a user bin directory, and cron's PATH includes neither.
+- **Cron wrappers on remote machines self-sync:** A cron script on a host with no automatic deploy pipeline should run `git pull --ff-only` at the start of each run.
+- **Generated crontabs:** If your crontab is generated from a registry file, edit the registry and regenerate. Before regenerating, check that the live crontab has no hand edits, or regenerating will silently drop them.
+- **Alert on cron failures:** Silent failures in unattended scripts are how expired auth goes unnoticed for days. Add an `EXIT` trap that sends an alert through a shared notification helper whenever the exit status is non-zero.
+- **Alert once, then suppress:** A monitoring script's marker file must record *whether an alert was already sent*, not only that a failure happened. Clear the marker on recovery.
+- **Overnight runs on WSL:** A wake timer can wake a sleeping machine but not one that is shut down. Before a scheduled overnight run, sleep the machine; don't shut it down.
+
+### CLI tools and agents
+
+- **`claude -p` vs `--print`:** In scripts that pipe stdin to `claude`, use `--print` whenever other flags follow. `-p` can consume the next argument as its prompt.
+- **`claude --model` takes aliases:** The CLI accepts short aliases, not API model IDs. Check which model actually served the request.
+- **`WebFetch` runs outside your network:** The request comes from the tool provider's edge, not your machine. For private or local URLs, use `curl` through Bash.
+- **Gemini CLI `-p` is text-only:** In headless mode, `@filepath` references are read as text, so video and image input don't work.
+- **Check free tiers before depending on them:** Free CLI tiers (for example the Gemini CLI's individual free tier) get deprecated. Before building an unattended job on one, confirm it still exists.
+- **Codex CLI:** Keep it up to date, because stale versions silently break every model. The vision `-i` flag is variadic, so pass the prompt through stdin. `codex exec` echoes the prompt in its output, so don't assert on the raw output.
+- **Custom skills have one source of truth:** Edit the skill in its repo, then deploy the live copy. Never edit only the installed copy.
+- **Copied OAuth tokens get revoked:** If you bootstrap a container's auth by copying a token from another container, both share one refresh token. When either side rotates it, the other is logged out. Give each consumer its own login.
+- **Make sure async work actually finishes:** Any runner that creates a PR, ticket or artifact for later pickup should check its own earlier outputs at the start of its next run. Don't count on a downstream janitor to notice.
+- **Verify a "safe to close" PR one change at a time:** Before closing a bundled PR as having nothing unique, check each distinct change in its diff against main separately.
+- **Gitignore runtime state in autonomous agent repos:** Everything the loop itself writes (state files, caches, logs) belongs in `.gitignore`.
+
+### Node and server code
+
+- **Env vars read at module level bake in the default (ESM):** A module can read `process.env` before `dotenv.config()` runs. Read env vars at call time, or make `import 'dotenv/config'` the first import in the entrypoint.
+- **undici `fetch` has a ~300s `headersTimeout`:** A backend that sends headers only after computing the whole body gets cut off. Raise the timeout with a custom dispatcher, or stream the response.
+- **`Promise.race` timeouts leave a timer running:** Clear the `setTimeout` in a `finally` once the main promise settles.
+- **Don't assign to a `const` loop variable in `for…of`:** It throws and can start a crash loop. Nulling a loop variable to "help GC" does nothing anyway.
+- **Release large objects in batch functions:** V8 may keep a large object alive until the function returns, even after it's no longer used. Set it to `null` explicitly once you're done with it inside long-running batch functions.
+- **Protect webhook handlers from queue saturation:** When a handler fires off background work, count the pending tasks and return HTTP 503 once a cap is reached.
+- **Use an array-based queue for bursty events:** To process events one at a time, use an array queue with one worker loop. Don't use an ever-growing promise chain.
+- **Express `URLSearchParams(req.query)` drops repeated params:** Iterate over the values and call `.append()` for each one.
+- **Express routes:** Null-check after a DB insert followed by a read. Wrap every route handler in try/catch. Guard nullable columns with `!== undefined`, not `||`.
+- **Handle 429s from external APIs:** In sequential API loops, use exponential backoff and also throttle between requests.
+- **Health endpoints should check data freshness:** Beyond DB connectivity, check that background sync jobs have written recently.
+- **Validate client-side storage schema:** Validate `localStorage` and `sessionStorage` data against the expected schema when you load it. Discard anything that doesn't match.
+- **Validate required fields in config parsers:** Never read required keys from user-written YAML, JSON or dicts by raw indexing. Check for them and raise a clear error.
+- **Validate email addresses before `smtplib` sends:** Run a basic sanity check on the address first.
+- **Guard string normalization output:** `slugify()` and similar functions can return `''` or `['']`. When the derived slug is empty, return `[]` or reject the input.
+
+### Data and batch processing
+
+- **Use ID-based cursor pagination:** For large tables, use `WHERE id > ? ORDER BY id LIMIT N`, not `LIMIT N OFFSET M`.
+- **Wrap every `JSON.parse` on DB rows in try/catch:** This matters most inside `.map()` and in loops that advance a cursor afterwards. One bad row must not crash the request or stall the pipeline forever.
+- **Isolate failures per item in batch loops:** One bad record should be logged and skipped, not abort the whole batch.
+- **Don't use a data column as a state machine:** If you record a failure by overwriting a status column, recovery queries can no longer find the item. Record failures explicitly.
+- **Check generators against live config:** A generator that claims to be the source of truth is dangerous once the live config has drifted. Diff the live config before you regenerate.
+- **SQLite `.iterate()`:** Always wrap it in try/finally so the cursor closes on error.
+- **SQLite `busy_timeout` alongside WAL:** WAL mode alone doesn't prevent `SQLITE_BUSY`. Also set `busy_timeout`.
+- **SQLite bind-parameter limit:** `createMany` and bulk inserts can exceed the per-statement limit (about 999 on older builds). Chunk the inserts. Also validate webhook timestamps before you store them.
+- **SQLite upsert with optional columns:** Branch on whether the optional field was provided, and use a separate prepared statement for each case, so an absent field doesn't overwrite a stored value with null.
+- **Detect SQLite corruption at startup:** Run `PRAGMA quick_check` at startup. If it reports corruption, restore automatically from the latest backup.
+- **Prisma + LibSQL adapter:** Don't pass `datasourceUrl` to the constructor, because the adapter already owns the connection.
+- **File watchers: exclude your own output:** A service that watches a directory and also writes into it must exclude its own output files, or it will trigger on itself forever.
+- **Chokidar `ignored`:** The function receives the full path. Match path segments, not substrings, and limit the watch depth.
+
+### AI content pipelines
+
+- **Where editor commentary goes:** A refinement pass tends to open with meta-commentary. Tell it explicitly to put any editor notes at the bottom, after the content.
+- **Strip narration at both ends:** When removing model meta-commentary, strip trailing notes as well as leading ones. Strip the trailing notes only when their heading is the last heading in the document.
+- **Multi-phase research pipelines:** Split research-and-recommend prompts into sequential phases, with disqualification gates that narrow the candidates before the deeper research.
+
+### Frontend and build
+
+- **Next.js standalone in a git worktree:** The server is nested under `.next/standalone/<path-from-repo-root>`, not directly under `.next/standalone/`. Adjust start scripts to match.
+- **A collapsed `<details>` still mounts its children:** Lazy-mount heavy content so it renders only when the element is opened.

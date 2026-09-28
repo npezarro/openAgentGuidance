@@ -1,7 +1,7 @@
 <!-- Load when: writing and running tests, cross-layer invariants -->
 # Testing Guidance
 
-Detailed testing standards for agents writing, running, and reviewing tests.
+Detailed testing standards for writing, placing, running and prioritising tests.
 
 ## When to Test
 
@@ -114,13 +114,13 @@ When a project has recurring quality issues (code ships that doesn't actually wo
 
 ### Layer 1: Failure Audit
 
-Before writing any new tests, classify the last 5-10 production incidents. For each, record:
+Before writing any new tests, classify the last 5-10 production incidents. For each:
 - What broke (auth, rendering, data, config, race condition)
 - Whether a test existed for that path
 - If a test existed and passed, *why* it passed when prod was broken (mock drift, shallow assertion, wrong environment config)
 - When it was caught (pre-deploy, post-deploy, user report)
 
-A simple table with one row per incident and these four columns is enough. The output tells you exactly which testing layer to invest in.
+Record these in a simple table (one row per incident, one column per question above). The output tells you exactly which testing layer to invest in.
 
 ### Layer 2: Contract Tests
 
@@ -136,8 +136,8 @@ If incidents trace back to "test passed with mocks but prod behaved differently,
 For backend logic failures (bad queries, broken migrations, auth provider interactions):
 - Hit real databases, real auth providers, and real caches
 - Control state setup explicitly: each test owns its fixtures
-- Run in CI; deterministic if you own the fixture lifecycle
-- **Do not mock the database.** Mock/prod divergence is the #1 source of false-green tests
+- Run in CI, deterministic if you own the fixture lifecycle
+- **Do not mock the database:** mock/prod divergence is the #1 source of false-green tests
 
 ### Layer 4: Post-Deploy Smoke Tests
 
@@ -173,56 +173,56 @@ Only proceed here if the failure audit shows incidents that ONLY a real browser 
 
 ## Rule Digest
 
-One line per lesson. Each is a failure mode that has shipped green tests over broken code at least once.
+One line per lesson, in the order they were learned.
 
-- **Fallback chains hide dead rungs; test each branch in isolation**: In a waterfall (try A, else B, else C), if an early rung dies a later rung catches everything and the end-to-end result still looks fine. Force each rung to be the one that answers.
-- **Testing shell scripts: don't stub a binary on PATH, stand up the real sink**: To test an alert path (webhook, email, HTTP callback), run a local listener and point the script at it rather than shadowing `curl` on `PATH`; a PATH trick can silently fail to take effect and the test still passes.
-- **Making Node.js servers testable**: Guard auto-start (only listen when run directly), isolate tests via environment variables (port, DB path), and use a factory function so dependencies can be injected.
-- **Test fixture schema drift**: Tests that embed their own DDL (`CREATE TABLE`) or data shapes silently drift from the real schema. Build fixtures from the real migrations or schema module.
-- **CI test workflow**: Run tests on every push and PR to the default branch via a standard CI workflow file.
-- **Mock fidelity**: Mocks that diverge from production are worse than no mocks; they give false confidence. Derive mock shapes from real responses.
-- **Cross-layer invariant tests**: Identify properties that must hold across layers (e.g. every DB enum value has a UI label, every route has an auth check, every config key has a consumer) and write one test per invariant that enumerates the real sources on both sides. Name them so the invariant is obvious from the test name.
-- **Zod validation in API routes**: Every API route that parses input with Zod must catch `ZodError` and return a 400, not let it surface as a 500.
-- **Live browser testing**: For testing web apps in a real browser during development, drive an actual browser (Playwright, CDP, or a browser automation tool) rather than trusting server responses alone.
-- **Don't grep test output to detect pass/fail**: Parsing runner output with `grep` is fragile. Use the runner's exit code or its machine-readable reporter (JSON/JUnit).
-- **CI workflow gotchas**: Quote test globs so the shell doesn't expand them differently in CI; commit `package-lock.json` or `npm ci` fails; Vitest fails the whole file when any imported module throws at import time.
-- **Accessibility: focus management after modal close**: When a modal, dialog, or lightbox closes (Escape, close button, backdrop click), focus must return to the element that opened it. Test all three close paths.
-- **Boundary validation: non-negative quantities from external sources**: `!x` and `x === 0` guards do NOT reject negative numbers. Validate explicitly with `x < 0` (and `Number.isFinite`) on values from webhooks, APIs, DB rows, or user input.
-- **Batch loop resilience: isolate per-item failures**: An unguarded throw inside a batch loop aborts the entire batch, not just the bad item. Wrap each iteration, record the failure, continue, and test with one poisoned item in the middle.
-- **Test a statistic at both sample parities**: A median (or any order statistic) must be tested with both odd- and even-length inputs, or an even-length bug survives.
-- **A fix proven on one app's data is not proven for a sibling app**: Before sharing a module across apps built from the same template, run it over the sibling's own production data and read the diff by hand.
-- **A hand-built fixture never tests the loader**: When a config file gains a field, add at least one test that writes a temp config, loads it through the real loader, and asserts the consumer sees the value.
-- **A measurement rig fails the same ways the thing it measures does**: Before collecting data, confirm the rig can actually observe the effect by construction (a known-positive control produces a positive).
-- **A metadata-only log is still replayable**: A telemetry log that omits sensitive fields can still be joined back to the source transcripts or records for regression testing; don't wait to "collect the real thing".
-- **Touch drag needs Pointer Events, and raw CDP touch in tests does not auto-scroll**: Implement drag with Pointer Events, and don't assume synthesized touch in a test scrolls the page the way a real finger does.
-- **A generated page passing a syntax check and a DOM-stub run proves nothing about readability**: For charts and visual output, take a screenshot and look at it.
-- **A bare URL in body text can overflow without any bounding box reporting it**: Detect horizontal overflow by comparing `scrollWidth` to `clientWidth` per element, not by checking element rects.
-- **Test the whole field set a boundary forwards**: When a layer passes data through, assert every field arrives, not just the ones that layer happens to use.
-- **A response that narrates the work is not the work**: Guard the output shape (the artifact, the structured result), not just the absence of error strings.
-- **Ordering tests must assert the exact sequence, not set completeness**: For a non-total `ORDER BY` (ties, no unique tiebreaker), "page 1 plus page 2 covers all rows once" passes on the unfixed code. Assert the exact order across repeated runs.
-- **Re-deriving a metric breaks every site that differences it against a source still computed the old way**: When changing how a metric is computed, find every subtraction or comparison against it and update or test those too.
-- **A push gate flagging a dirty file during a live verifier run may be flagging the unfixed source**: Confirm which version of the file the gate actually read before "fixing" it again.
-- **A server-side-only default is invisible to client-rendered markup**: A default exposed through a server-side template accessor (e.g. a PHP function in a CMS theme) won't appear where JS renders the same element. Test both render paths.
-- **Test design variants against per-variant expectations**: One generic assertion across all variants lets a variant-specific bug through.
-- **Run a throwaway WordPress locally with the SQLite drop-in**: No MySQL needed for disposable integration tests.
-- **A hidden filter button must not hide the work**: If the UI hides a control, make sure the list it reads is split so items aren't silently excluded.
-- **`git show ref:file > file` truncates the target before git runs**: A bad ref leaves you with an empty file. Write to a temp file and move it only on success.
-- **A filter, count badge, or search box over a capped list silently under-reports**: Compute counts and search against the full set, not the displayed page.
-- **A ranking over a capped list is not a ranking**: Rank the full set, and check that clamped weights haven't collapsed distinct scores into ties.
-- **A headless `claude --print` run inherits the host's CLAUDE.md and SessionStart hooks**: Isolate config (separate config dir, no hooks) before measuring model behavior.
-- **Two mutation-testing traps for data-store write paths**: When testing a write (cancel, update, status change), assert the stored state changed to the expected value by re-reading the store, and assert the unaffected rows did not change; weaker forms pass over broken code.
-- **A builder generating a deliverable from source lists must assert every entry appears exactly once** before writing the output.
-- **A verdict parsed from a tool's stdout format can be inverted**: Confirm pass/fail against actual system state, not only the tool's printed summary.
-- **A rotted live control is indistinguishable from a detector regression** unless a second, independent source is consulted.
-- **Playwright `allInnerTexts()` returns empty strings for SVG `<text>` nodes**: Assert on `textContent` instead.
-- **A stale-tolerant cached health probe is correct for a sampler and wrong for an explicit user choice**: When the user picks a specific target, probe it fresh.
-- **Stamp a per-request marker in the shared builder every path already calls**, not at each call site, so no path can skip it.
-- **A worktree created inside the repo makes the test runner double-count every test file**: The baseline inflates exactly 2x. Create worktrees outside the repo or exclude them from test discovery.
-- **A negative assertion passes vacuously when the harness never produced the positive**: Pair every "X does not appear" with a check that the harness actually ran and could have produced X.
-- **A build that imports every module runs any script's top-level `process.exit`**: This silently skips the build's own later checks. Guard script entry points.
-- **A config flag that alters generation behavior must be benchmarked on the hard case**, not the easy one where every setting looks the same.
-- **Extracting a JSON array from an LLM response: match the first balanced array**, not greedily to the last `]`.
-- **A `tsx` test script's delayed dynamic import cannot pull a type-only member out with `type X`**: Import types statically.
-- **Headless-smoke-test a static prototype via raw CDP and Node 22's global `WebSocket`**: No puppeteer dependency needed.
-- **Playwright input events leak across a same-page navigation**: A reload after an interaction must reopen in a fresh page or context.
-- **An old CLI may accept a newer `--model` id and silently serve an older model**: Verify the model reported in the response, not the flag you passed.
+- **Fallback Chains Hide Dead Rungs (test each branch in isolation)**: A fallback/waterfall (try A, else B, else C) is the highest-risk structure for a **silent miss**: if an early rung dies, a later rung catches everything and the end-to-end result still looks correct. Force each rung to be the one that answers, and assert on it.
+- **Testing Shell Scripts: Don't Stub a Binary on PATH, Stand Up the Real Sink**: Shell scripts that alert (webhook, email, HTTP callback) need their alert path tested, and the instinct is to drop a fake `curl` earlier on `PATH`. Instead, point the script at a real local listener and assert on what it actually received.
+- **Making Node.js Servers Testable**: covers Auto-Start Guard (don't call `listen()` on import); Test Isolation via Environment Variables; Factory Pattern for Dependency Injection.
+- **Test Fixture Schema Drift**: When tests embed their own DDL (CREATE TABLE) or data shapes, they silently drift from the real schema as the application evolves. Build fixtures from the real migrations/schema.
+- **CI Test Workflow**: A standard `.github/workflows/test.yml` that runs tests on every push and PR to the default branch is the baseline.
+- **Mock Fidelity**: Mocks that diverge from production are worse than no mocks: they give false confidence.
+- **Cross-Layer Invariant Tests**: covers What Are Invariants?; When to Write Invariant Tests; How to Write Them; Naming Convention; Common Patterns Across Projects.
+- **Zod Validation in API Routes**: Every Next.js API route that parses input with Zod **must** catch `ZodError` and return a 400 response.
+- **Live Browser Testing**: For testing web apps in a real browser during development, drive a real browser with an automation tool rather than trusting unit tests for UI behavior.
+- **Don't Grep Test Output to Detect Pass/Fail**: Parsing test runner output with `grep` to determine pass/fail is fragile. Use the runner's exit code or a machine-readable reporter.
+- **CI Workflow Gotchas**: covers Test Glob Quoting on GitHub Actions; package-lock.json Must Be Committed for CI; Vitest Fails When Any Imported Module Throws at Import Time.
+- **Accessibility: Focus Management After Modal Close**: When a modal, dialog, or lightbox closes (Escape, close button, backdrop click), focus must return to the element that opened it.
+- **Boundary Validation: Non-Negative Quantities from External Sources**: When validating numeric values parsed from external input (webhook payloads, API responses, database records, user data), `!x` and `x === 0` guards do NOT reject negative numbers. Check `x < 0` (and non-finite values) explicitly.
+- **Batch Loop Resilience: Isolate Per-Item Failures**: When a loop processes a batch (DB rows, files, API records) and each iteration runs an operation that can throw on bad data, an unguarded throw aborts the ENTIRE batch, not just the bad item. Catch per item, record the failure, continue.
+- **Test a statistic at both sample parities or an even-length median bug survives.**
+- **A fix proven on one app's corpus is NOT proven for a sibling app**: Before sharing a module across sibling apps built from the same template, run it over the sibling's OWN stored production rows and read the diff by hand.
+- **A hand-built fixture never tests the loader**: When a config file gains a field, add at least one test that goes through the **real loader**: write a temp config, load it, assert the consumer sees the value.
+- **A measurement rig fails the same ways the thing it measures does; check it is measurable BY CONSTRUCTION before collecting.**
+- **A metadata-only log is still replayable: rejoin it to the transcripts**: A shadow/telemetry log that deliberately omits sensitive fields looks untestable, but joining it back to the full source records by ID makes it a regression corpus.
+- **Touch drag needs Pointer Events, and raw CDP touch in tests does not auto-scroll.**
+- **A generated page passing `node --check` and a DOM-stub run proves nothing about whether the chart is readable: screenshot it and look.**
+- **A bare URL in body text overflows the document without any element's bounding box reporting it; compare `scrollWidth` to `clientWidth` per element.**
+- **Test the whole field set a boundary forwards, not just the fields it happens to implement.**
+- **A response that narrates the work is not the work: guard output SHAPE, not just error strings.**
+- **Ordering tests must assert the exact sequence, not set completeness**: When fixing a non-total ORDER BY (a sort key with ties and no unique tiebreaker), the obvious test ("page 1 union page 2 covers all N rows exactly once") PASSES on the unfixed code. Assert the exact order.
+- **Re-deriving a metric breaks every site that DIFFERENCES it against a source still computed the old way.**
+- **A push gate flagging a dirty file during a live verifier run may be flagging the UNFIXED source.**
+- **A PHP-only default is invisible to JS-rendered markup**: A WordPress theme can define a default (a tagline, a label, any copy) and expose it through a PHP accessor, and that default will be correct everywhere PHP prints but missing wherever JS renders the same field.
+- **Test design variants against per-variant expectations, not one generic assertion.**
+- **Run a throwaway WordPress locally with the SQLite drop-in, no MySQL needed.**
+- **A hidden filter button must not hide the work, so split the list the UI reads.**
+- **`git show ref:file > file` truncates the target before git runs, so a bad ref empties the file.**
+- **A filter, count badge, or search box over a capped list silently under-reports: compute against the full set.**
+- **A ranking over a capped list is not a ranking, and clamped weights collapse the ranking you did compute.**
+- **A headless `claude --print` run inherits the host's CLAUDE.md and SessionStart hooks; isolate before measuring.**
+- **Two mutation-testing traps for data-store write paths**: When mutation-testing a feature that writes to a data store (cancel, update, status change), assertions that only check the return value or only check that "some write happened" produce green suites over broken code. Read the stored row back and assert the exact field values.
+- **A builder generating a deliverable from source lists must assert every entry appears exactly once before writing.**
+- **A verdict parsed from a tool's stdout format can report all-failures on all-successes; confirm against system state.**
+- **A rotted LIVE control is indistinguishable from a detector regression unless a second, independent source is asked.**
+- **Playwright `allInnerTexts()` returns empty strings for SVG `<text>` nodes; assert on `textContent`.**
+- **A stale-tolerant cached health probe is correct for a sampler and wrong for an explicit user choice.**
+- **Stamp a per-request marker in the shared builder every path already calls, not at each call site.**
+- **A worktree created inside the repo makes the test runner double-count every test file, inflating the baseline exactly 2x.**
+- **A negative assertion passes vacuously when the harness never produced the positive.**
+- **A build that imports every module runs any script's top-level `process.exit`, silently skipping its own checks.**
+- **A config flag that alters generation behavior must be benchmarked on the hard case, not the easy one.**
+- **Extracting a JSON array from an LLM response: match the FIRST balanced array, not greedily to the LAST bracket.**
+- **A `tsx` test script's delayed dynamic import cannot pull a type-only member out with `type X`.**
+- **Headless-smoke-test a static prototype via raw CDP + Node 22 global WebSocket (no puppeteer).**
+- **Playwright input events leak across a same-page navigation, so a reload after an interaction must reopen in a fresh page/context.**
+- **Prefer in-process route tests over a real loopback listener**: `server.listen(0, '127.0.0.1')` per test can hit `EPERM` in restricted sandboxes; drive the app via an in-process request helper, supertest, or `app.handle()` with mock req/res instead. But see Mock Fidelity: a hand-rolled req/query object that normalizes input can make real-parser edge cases silently untestable.
