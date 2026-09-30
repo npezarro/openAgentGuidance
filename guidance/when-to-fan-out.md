@@ -1,39 +1,41 @@
 <!-- Load when: when to spawn subagents (Task fan-out / parallel bash / Workflow) vs stay single-agent; concurrency-safe 3-phase pattern -->
 # When to Fan Out into Subagents
 
-Guidance for autonomous loops and interactive sessions on when to spawn subagents (Task tool / parallel `claude -p` / Workflow) versus staying single-agent. The default is single-agent. Fan out only when the task structure genuinely benefits.
+This covers when autonomous loops and interactive sessions should spawn subagents (the Task tool, parallel `claude -p`, or Workflow) and when they should stay single-agent. The default is single-agent. Fan out only when the structure of the task actually benefits from it.
 
 ## The three primitives, and where each applies
 
-1. **In-session Task fan-out**: a single `claude -p` session spawns subagents via the Task tool. Works in headless `--dangerously-skip-permissions` sessions. Use the Task tool with an INLINE role description; do not rely on a custom agentType name resolving in headless mode. This is the only fan-out available to a cron `claude -p` loop.
-2. **Bash-level parallelism**: `&` + `wait -n` throttle, or `xargs -P`. Use when a loop calls `claude -p` (or any subprocess) once per independent item. Cron-friendly, no SDK needed.
-3. **Workflow tool**: deterministic multi-agent orchestration (fan-out, pipeline, adversarial verify, synthesize). Runs inside an interactive/SDK session, NOT a bare cron `claude -p`. Use for interactive heavy work (deep review, multi-source research, migrations).
+1. **In-session Task fan-out.** One `claude -p` session spawns subagents through the Task tool. This works in headless `--dangerously-skip-permissions` sessions. Give the Task tool an INLINE role description. In headless mode, don't count on a custom agentType name resolving. This is the only fan-out a cron `claude -p` loop has.
+2. **Bash-level parallelism.** Use `&` with a `wait -n` throttle, or `xargs -P`. It fits a loop that calls `claude -p` (or any subprocess) once per independent item. It works from cron and needs no SDK.
+3. **Workflow tool.** Deterministic multi-agent orchestration: fan-out, pipeline, adversarial verify, synthesize. It runs inside an interactive or SDK session, NOT a bare cron `claude -p`. Use it for heavy interactive work such as deep review, multi-source research, or migrations.
 
 ## Fan out when
 
-- **An independent claim needs an independent check.** Before a loop reports "fixed / passing / works", especially a loop that self-merges or deploys, spawn a verifier subagent that RE-RUNS the falsifying command and tries to refute. A skeptic with fresh context catches what the author rationalized.
-- **N genuinely independent items are processed one at a time.** A `for item in list; do claude -p ...; done` where items do not depend on each other (per-PR reviews, per-item generation, per-repo audits). Parallelize the expensive calls; keep shared-state writes serial.
-- **A finding touches 3+ repos, architecture, or security.** Spawn a deep-analysis subagent to trace the full impact chain before acting.
-- **A decision benefits from diverse perspectives.** Spawn architect/reviewer/qa/security specialists in parallel on the same artifact, then synthesize.
+- **An independent claim needs an independent check.** Before a loop reports "fixed", "passing" or "works" (especially a loop that self-merges or deploys), spawn a verifier subagent. It should RE-RUN the falsifying command and try to refute the claim. This enforces "verify before asserting" and "test before reporting". A skeptic with fresh context catches what the author talked themselves into.
+- **N truly independent items are being processed one at a time.** For example, a `for item in list; do claude -p ...; done` over items that don't depend on each other: per-PR reviews, per-document drafts, per-channel analysis, per-repo audits. Run the expensive calls in parallel. Keep writes to shared state serial.
+- **A finding touches 3+ repos, architecture, or security.** Spawn a deep-analysis subagent to trace the full chain of impact before acting.
+- **A decision benefits from several perspectives.** Run architect, reviewer, QA and security specialists in parallel on the same artifact, then combine their output.
 
 ## Stay single-agent when
 
 - The task touches a handful of files in one context.
-- Work requires sequential discovery before it can be decomposed.
-- The item count is small and each call is cheap (fan-out overhead exceeds the saving).
-- A deterministic check already exists. A real `npm run build` gate beats an LLM verifier for build/test; reserve the verifier for correctness the build cannot prove (root cause, logic, symptom-silencing).
+- The work needs sequential discovery before it can be split up.
+- There are few items and each call is cheap, so fan-out overhead costs more than it saves.
+- A deterministic check already exists. A real `npm run build` gate beats an LLM verifier for build and test results. Save the verifier for correctness the build can't prove: root cause, logic, symptom-silencing.
 
 ## Concurrency safety (mandatory)
 
-Parallel agents must never share non-atomic state. If a loop writes a JSON state file via jq read-modify-write, or performs irreversible mutations (`gh pr close/ready/merge`, deploys), those steps stay SERIAL. The safe shape is three phases:
+Parallel agents must never share non-atomic state. Some steps must stay SERIAL: writing a JSON state file through a jq read-modify-write, and irreversible mutations (`gh pr close/ready/merge`, deploys). The safe shape has three phases:
 
-1. **Gate (serial):** decide which items proceed; cheap idempotent mutations OK.
-2. **Work (parallel):** the expensive, read-only calls; write each result to its own file. No shared-state writes.
-3. **Apply (serial):** read results in order; perform all mutations and state writes here.
+1. **Gate (serial):** decide which items proceed. Cheap, idempotent mutations are fine here.
+2. **Work (parallel):** run the expensive, read-only calls. Each result goes to its own file. No writes to shared state.
+3. **Apply (serial):** read the results in order. Do all mutations and state writes here.
+
+**Give each agent its own scratch subdirectory in the brief** (e.g. `<scratch>/<batch>/`). Agents independently write helper scripts with the same obvious names (`pub.sh`, `verify.py`). In a shared scratch root they overwrite each other mid-run, and the output silently comes out wrong.
 
 ## Node.js subprocess parallelism gotcha: `execSync` blocks
 
-When parallelizing `claude -p` calls from Node.js, use **non-blocking `spawn`**, not `execSync`. `execSync` is synchronous: it blocks the Node.js event loop until the subprocess exits. Wrapping it in `Promise.all` gives NO actual parallelism; calls still run serially despite the async appearance.
+To run `claude -p` calls in parallel from Node.js, use **non-blocking `spawn`**, not `execSync`. `execSync` is synchronous: it blocks the event loop until the subprocess exits. Wrapping it in `Promise.all` gives NO real parallelism. The calls still run one after another, even though the code looks async.
 
 **Wrong (serial despite Promise.all):**
 ```js
@@ -59,150 +61,126 @@ function callClaude(item, prompt) {
 await Promise.all(items.map(item => callClaude(item, buildPrompt(item))))  // actually parallel
 ```
 
-For Python, use `concurrent.futures.ThreadPoolExecutor` with a bounded pool (env `*_CONCURRENCY`, default 3):
+In Python, use `concurrent.futures.ThreadPoolExecutor` with a bounded pool (env `*_CONCURRENCY`, default 3):
 ```python
 from concurrent.futures import ThreadPoolExecutor
 with ThreadPoolExecutor(max_workers=concurrency) as pool:
     results = list(pool.map(process_item, items))
 ```
 
-Keep all shared-state writes (JSON files, DB, counters) on the main thread in original order after collection.
+After collecting results, do all shared-state writes (JSON files, DB, counters) on the main thread, in the original order.
 
 ## Cost discipline
 
-Fan-out multiplies token spend. Gate every autonomous fan-out behind a usage/budget check that aborts when the account is near its cap, and log any coverage cap (top-N, no-retry) so silent truncation never reads as full coverage.
+Fan-out multiplies token spend. Put every autonomous fan-out behind a usage check that aborts above a threshold (e.g. a script that exits non-zero at 75% of your plan's usage window). Log every coverage cap (top-N, no-retry) so that silent truncation never looks like full coverage.
 
 ## When fanning out to TEST TECHNIQUES, demand a negative control
 
-A fan-out that asks "which of these N approaches works?" produces confident-sounding successes that are easy to misread. Two requirements turn it into evidence:
+A fan-out that asks "which of these N approaches works?" produces confident successes that are easy to misread. Two requirements turn it into evidence:
 
-1. **Every claimed success gets an adversarial re-run** by an agent instructed to *refute* it, from scratch, using only the reported reproduction command. Default to REFUTED when it cannot be reproduced. (Already covered above; this is the same rule applied to technique discovery rather than to bug fixes.)
+1. **Every claimed success gets an adversarial re-run.** An agent told to *refute* it tries again from scratch, using only the reported reproduction command. If it can't reproduce the result, the default verdict is REFUTED.
+2. **Require a negative control in the agent's brief.** Ask outright: *what is the cheapest change that should NOT work, and does it in fact fail?* Without that you learn "X worked" but not "X worked *because of Y*", and only the second lets you build on it. A skipped control can hide the real mechanism: a change that looked like the fix may produce byte-identical output to the baseline, while a different variable was doing the work. Without the control you end up with a working trick, no model of why, and the wrong abstraction built on top.
 
-2. **Require a negative control in the agent's brief.** Ask explicitly: *what is the cheapest change that should NOT work, and does it in fact not work?* Without it you learn "X worked" but not "X worked *because of Y*", and only the second lets you build on it.
+Warn agents explicitly against two failure modes:
 
-> Lesson from a technique sweep: dozens of verified "successes" were less valuable than the one control that had been skipped. Re-running the cheapest variant that should not have worked showed the target's response was byte-identical to the blocked baseline, which is what identified the real mechanism. Without the control you have a working trick and no model, and will build the wrong abstraction.
-
-Two failure modes to brief agents against explicitly:
-
-- **Fabricated test fixtures.** An invented ID or URL returns a genuine 404 and reads as "blocked", sending the whole investigation down a false path. Control URLs must come from the real data source (the production DB, a sitemap), never from memory or typing.
-- **Self-inflicted rate limiting.** Bursting a target during testing turns a working technique into an apparent failure. Instruct agents to pace and to re-test after a cooldown before declaring something impossible.
-
----
+- **Fabricated test fixtures.** An invented ID or URL returns a real 404, which reads as "blocked" and sends the investigation down a false path. Control inputs must come from the real data source (the production DB, a sitemap), never from memory or typing.
+- **Self-inflicted rate limiting.** Hammering a target during testing makes a working technique look like a failure. Tell agents to pace their requests and to re-test after a cooldown before calling something impossible.
 
 ## Persist what agents return
 
-A subagent's report exists in exactly one place: the tool result in your context. If you distill it into a smaller deliverable and let the raw report go out only in your chat response, **the detail is gone** the moment the turn ends. Chat is not storage. It is not greppable, diffable, or linkable, and a long response can be truncated in the live view.
+A subagent's report exists in exactly one place: the tool result in your context. If you boil it down into a smaller deliverable and the raw report only goes out in your chat response, **the detail is gone** when the turn ends. Chat is not storage. You can't grep it, diff it or link to it, and a long response can be truncated in the live view.
 
-Rules:
+- **Write each substantial subagent report to a file in the same turn**, alongside (not instead of) any synthesis you produce.
+- **One file per agent when they cover parallel items**, plus a `README.md` index. Don't merge N reports into one file and lose the per-item structure the fan-out gave you.
+- **Commit the source too** when the work cites one (transcript, dataset, page dump, query output). It is usually small compared to its value, and it keeps every quoted claim re-checkable with `grep` instead of taking the summary on trust.
+- **Verify delegated claims before publishing.** Ask for verbatim quotes with locators (timestamps, line numbers, file paths) in the agent's brief, then spot-check the important ones yourself. Re-run zero-counts ("term X never appears") directly. They are the easiest claim for an agent to get wrong and the most damaging to assert.
 
-- **Write each substantial subagent report to a file in the same turn**, alongside (not instead of) whatever synthesis you produce. Large outputs go to files.
-- **One file per agent when they cover parallel items**, plus a `README.md` index. Do not merge N reports into one file and lose the per-item structure the fan-out bought you.
-- **Commit the source too** when the work cites one (transcript, dataset, page dump, query output). It is usually small relative to its value, and it is what keeps every quoted claim re-checkable with `grep` instead of trusting the summary.
-- **Verify delegated claims before publishing.** Require verbatim quotes with locators (timestamps, line numbers, file paths) in the agent's brief, then spot-check the load-bearing ones yourself. Zero-counts ("term X never appears") are worth re-running directly: they are the easiest claim for an agent to get wrong and the most damaging to assert.
+## Verify in an isolated git worktree when another session is mid-edit in the same checkout
 
-### Verify your change in an isolated git worktree when another session is mid-edit in the same checkout
+When several sessions share one working tree, a repo-wide `npx tsc --noEmit` or `npm run build` can fail on files you never touched. If you take that at face value, you either report a broken build that isn't yours or commit someone else's work in progress.
 
-Multiple agent sessions can share one working tree per repo, so a repo-wide `npx tsc --noEmit` or `npm run build` can fail on files you never touched. Taking that at face value means either falsely reporting a broken build or committing someone else's work-in-progress.
+Procedure when `git status` shows modified or untracked files you didn't create:
 
-Procedure when `git status` shows modified/untracked files you did not create:
-
-1. Attribute the errors first: `npx tsc --noEmit 2>&1 | grep -c <your-file>`. Zero hits means the failure is not yours.
-2. Verify in isolation: `git worktree add -b <branch> ../wt-<repo> origin/<default-branch>`, copy in only your file(s), then run tsc + build there.
-3. `node_modules` in the worktree must be a hardlink copy (`cp -al ../<repo>/node_modules node_modules`), NOT a symlink: some bundlers panic with "Symlink [project]/node_modules is invalid, it points out of the filesystem root" and the build dies before compiling anything. The worktree must also live on the same filesystem as the source for `cp -al` to work.
+1. Attribute the errors first: `npx tsc --noEmit 2>&1 | grep -c <your-file>`. Zero hits means the failure isn't yours.
+2. Verify in isolation: `git worktree add -b <branch> ../wt-<repo> origin/<default-branch>`, copy in only your file(s), then run tsc and the build there.
+3. `node_modules` in the worktree must be a hardlink copy (`cp -al ../repo/node_modules node_modules`, which takes about a second), NOT a symlink. Some bundlers (Turbopack, for one) reject a symlinked `node_modules` that points outside the project root and die before compiling anything. The worktree must be on the same filesystem as the source for `cp -al` to work.
 4. Commit from the worktree, push, open the PR, then `git worktree remove --force` and `git branch -D`.
-5. Revert your leftover edits from the shared checkout afterwards (`git checkout -- <files>`) so the other session's `git add -A` cannot sweep a duplicate of your merged change into their commit.
+5. Afterwards, revert your leftover edits in the shared checkout (`git checkout -- <files>`). Otherwise the other session's `git add -A` can sweep a duplicate of your merged change into its commit.
 
-Also: do NOT deploy from a shared checkout in this state; a deploy skill that builds from the local tree would ship the other session's incomplete work.
+Also, do NOT deploy from a shared checkout in this state. A deploy that builds from the local tree will ship the other session's unfinished work.
 
-### A research subagent that writes its report only at the end loses everything if it hits the output-token cap
+## Long research deliverables: write incrementally, return short
 
-A subagent dispatched to produce a long research file can complete a hundred research tool calls, then die with "response exceeded the output token maximum" before writing anything to disk. All of that research is lost, and the parent has no partial artifact to salvage.
+A subagent that saves its whole deliverable for one final Write (or one huge final message) can hit the per-response output-token cap and die having written nothing. All of its research is lost, and a dead agent leaves no transcript the parent can cheaply recover.
 
-Why: the agent batched its whole deliverable into one final Write (or a single oversized final message). The output cap applies per assistant response, so a large single write is the exact failure mode. A dead agent leaves no transcript the parent can cheaply recover, since reading the subagent transcript overflows the parent's context.
+- Tell research subagents to **create the output file early with a skeleton, then append one section per Write/Edit call**.
+- Keep the subagent's final return message short (under ~300 words). The return value is not the deliverable.
+- Check that the file exists before relying on it.
+- Plan for relaunching: a usage gate may block respawning, so one lost agent can become a gap you can't recover mid-session. Prefer several narrowly scoped agents over one broad one.
 
-How to apply: when dispatching a research subagent that must produce a long file, instruct it to (1) write the file INCREMENTALLY, creating it early with a skeleton then appending one section per Write/Edit call, and (2) keep its final return message short (under ~300 words), since the return value is not the deliverable. Then verify the file exists before relying on it. Also budget for relaunch: a usage guardrail may block respawning, so a single lost agent can become an unrecoverable gap mid-session. Prefer several narrowly-scoped agents over one broad one.
+## Do NOT infer subagent liveness from its transcript file
 
-### Do NOT infer subagent liveness from its transcript file; wait for the harness notification
+No cheap filesystem signal tells you whether a subagent is still alive. File size readings can contradict each other at the same moment. Mtime can stay frozen for 10+ minutes while an agent is busy inside a long tool call. A queued message that hasn't been delivered doesn't mean the agent is dead either, because it gets delivered at the agent's next tool round. The authoritative signal is the harness task notification, which always arrives. Wait for it.
 
-There is no cheap filesystem signal for "is my subagent still alive". Neither size nor mtime works, and guessing wrong is expensive in both directions. The authoritative signal is the harness task-notification, which always arrives. Wait for it.
+When a subagent's output is overdue:
 
-Measured, in one run, on a verifier that was alive and working the whole time:
+- Wait. Arm a background `until [ -f <deliverable> ]; do sleep 10; done` watcher and keep working on independent tasks. Don't poll in the foreground.
+- Do NOT read a large agent transcript to investigate. It will overflow the parent's context.
+- Do NOT write the expected deliverable path yourself as a "status record" while the agent may still be running. It races the real agent, which then overwrites your file, and any watcher on that path fires on YOUR write, which is easy to mistake for the report arriving.
+- Never let a missing verdict quietly become an implied one, and never declare an agent dead unless the harness says so.
 
-- Size readings CONTRADICTED each other at the same instant: `stat -c %s` said 123 bytes while the file reader refused the same path as "270.2KB".
-- MTIME was frozen for 10+ minutes while the agent was mid-flight. A long tool call (or buffered writes) produces no mtime movement, so "frozen mtime" does not mean dead.
-- A queued SendMessage nudge sitting undelivered also does not mean dead: it is delivered at the agent's next tool round, which may be minutes away.
+## An unreturned verifier is a third outcome: "no verdict"
 
-What to do when a subagent's output is overdue:
+A verifier that never returns is neither "confirmed" nor "refuted", and you need a response planned in advance. The two opposite failures are: (a) announcing that the verifier stalled, and then it returns a minute later; (b) blocking the session for an hour waiting on a notification that never comes.
 
-- Wait. Arm a background `until [ -f <deliverable> ]; do sleep 10; done` watcher and keep working on independent tasks; do not poll in the foreground.
-- Do NOT read a large agent transcript to investigate; it will overflow the parent's context. (Metadata is also uninformative, per above.)
-- Do NOT write the expected deliverable path yourself as a "status record" while the agent may still be running. It races the real agent (which then overwrites your file), and any watcher armed on that path fires on YOUR OWN write, which is easy to misread as the report arriving.
-- Never let a missing verdict silently become an implied one, but equally, never declare an agent dead without the harness saying so. Both are unfounded claims about state you did not observe. If you have already published a liveness claim that later proves wrong, retract it explicitly wherever it was published.
+**Do not publish anything about a subagent's status until it has reported.** Careful hedging ("no verdict has arrived yet") still puts a false impression in front of a reviewer when the verdict lands shortly after, and then you have to retract it in public. Say nothing, or "verification pending".
 
-### An unreturned verifier subagent must degrade to "no verdict", never to a blocked session or an implied verdict
+Make the wait cheap by construction, so that a slow or missing agent costs only time:
 
-A spawned verifier/reviewer subagent that never returns is a THIRD outcome, distinct from both "confirmed" and "refuted", and it needs a pre-planned response. Two opposite failures are on record from consecutive runs of the same loop: one concluded mid-flight that the verifier had stalled and published "no independent verdict backs this PR" (the agent returned about a minute later); the next genuinely never returned and about an hour of session time was spent holding for a notification that never arrived.
+1. **Commit before spawning the verifier.** Then the shared worktree can't produce a bad commit if the agent leaves half-reverted edits behind.
+2. **Run the authoritative test and build from a second worktree pinned to the pushed commit** (`git worktree add /tmp/<n> --detach <branch>`). Evidence gathered there is unaffected by whatever the verifier does to the shared tree.
+3. **At the end, re-check** that HEAD is unchanged, the tree is clean, and the fix is still present (`git show HEAD:<file>`).
 
-The rule that covers both: report only what is observable ("no notification arrived, no report file was written"), never escalate that to a claim about the agent being dead or stalled, and never let the absence of a verdict silently read as a verdict either way.
+Give the verifier an explicit time budget. Once it runs out, proceed with evidence you gathered yourself, labelled as such. A PR shipped with honest provenance ("no independent verdict exists; here is my own reproducible evidence") beats both a blocked session and an unlabelled hint that review happened.
 
-Make the wait cheap by construction, so an unreturned agent costs nothing but time:
+## Lessons verifiers tend to surface
 
-1. COMMIT before spawning the verifier. The shared worktree then cannot become the source of a bad commit if the agent leaves mid-revert edits behind.
-2. Run the authoritative test/build from a SECOND worktree pinned to the pushed commit (`git worktree add ../wt-verify --detach <branch>`). Evidence gathered there is immune to whatever the verifier is doing to the shared tree.
-3. Re-check at the end that HEAD is unchanged, the tree is clean, and the fix is still present via `git show HEAD:<file>`.
+- **Comparing an error's size to a threshold's size is a margin fallacy.** When a sharp cutoff (e.g. `>= 5`) is applied to rounded integers, 1 unit of contamination is exactly enough to cross it. The question isn't "is the error small next to the threshold", it's "does the error move the value ACROSS the threshold". Test by replaying real history through both versions and diffing which branch each one takes, not just the values.
+- **Fixing one instance of a defect class means auditing every sibling instance.** Hardening one field against a trap while its twin keeps the same flaw is a half-fix.
+- **Analysing only "clean" windows silently drops real production cases.** Restricting to full-length windows can exclude real outputs and understate how big the bug is.
+- **A test can be named for a property it doesn't test.** An "invariant to X" fixture built on uniform input can pass for any implementation. Pin a choice with a fixture where the alternatives truly disagree, and confirm every new assertion FAILS against the pre-fix code.
+- **Check verifier corrections too.** For example, `-0 === 0` is true, but `assert.strictEqual` uses `Object.is`, where `Object.is(-0, 0)` is false. A "no-op" normalisation can be what keeps a test suite passing.
 
-Set an explicit time budget for the verifier and proceed past it with self-gathered evidence, labelled as such. A PR shipped with honest "no independent verdict exists, here is my own reproducible evidence" provenance is strictly better than either a blocked session or an unlabelled implication that review happened.
+## Brief a verifier with the same preconditions the artifact states
 
-### Never publish a subagent's status before it reports; and comparing an error's size to a threshold's size is a margin fallacy
+A verifier given the branch and the claim, but NOT the precondition the claim depends on, will test the unconditional version, find it false, and return a confident REFUTED wrapped around several correct minor findings. Example: the PR says its fix only becomes reachable once another open PR merges, but the verifier tests against the base alone and reports the documented caveat as a fatal flaw.
 
-RULE 1: do not publish anything about a subagent's status until it has actually reported. One run concluded a verifier had stalled and published "no independent verdict backs this PR"; it returned a minute later. The next run was careful NOT to claim the agent had died, said only "no verdict has arrived", published that on the PR, and the verifier returned CONFIRMED WITH CORRECTIONS shortly after. Careful phrasing did not help: the practical effect was still a false statement in front of a reviewer, requiring a public retraction. The fix is not better hedging, it is silence. Say nothing about the agent, or "verification pending". There is no cheap filesystem liveness signal (not size, not mtime, not the absence of an expected report file) and an absent report proves nothing.
+- Put the preconditions IN the verifier prompt, not just in the artifact: which other branches are assumed merged, which env or flags, which build. "Verify commit X" is underspecified whenever X's correctness is conditional.
+- State the environment your own evidence came from, so a mismatch shows up as a disagreement about setup rather than about the claim.
+- When a verdict comes back REFUTED, first check whether it tested the same configuration you did. If it didn't, the verdict is about a different artifact.
+- A wrong headline verdict does not justify throwing out the details. Triage the sub-findings one by one. Loose prose that your own evidence contradicts ("A and B both fire" for two branches that can't both run, "only a reload fixes it" when something else also does) is a real finding.
 
-RULE 2 (the substantive lesson from what that verifier found): comparing an ERROR SIZE to a THRESHOLD SIZE is a margin fallacy. A metric had roughly 1 unit of measurement contamination and the reporting rule was a `>= 5` cutoff, so the contamination was dismissed as immaterial. But a sharp cutoff applied to ROUNDED INTEGERS means 1 unit is exactly enough to cross it. The question is never "is the error small relative to the threshold", it is "does the error move the value ACROSS the threshold". Measured on real data: 2 of 28 production days emitted the OPPOSITE user-facing advice. Test by replaying real history through both estimators and diffing the branch taken, not the value.
+## Research subagents must not delegate
 
-Three corollaries, all from the same review:
+A subagent given a research prompt may spawn its own subagent and return "I've launched an agent, I'll report back" as its final answer. A subagent's final message is its return value, so that answer is a null result that cost a full agent's runtime. The orphaned child can't be cancelled from the parent and keeps writing to the same output path, overwriting whatever lands there later (last writer wins, no error).
 
-- Fixing one instance of a defect class obliges auditing every sibling instance. The same run hardened one LLM-brief field against exactly this trap and left its twin shipping a differently-weighted pair WITH a prompt instruction to difference it.
-- Analysing only "clean" windows silently drops real production days. Restricting to full-length lookback windows excluded six genuinely shipped reports and understated the bug from 8 days to 5.
-- A test can be named for a property it does not actually test. An "invariant to the later day weights" fixture used a UNIFORM move, which is weight-invariant under ANY index formula, so the estimator could be mutated Laspeyres to Paasche with the whole suite still green. Pin a choice with a fixture where the alternatives genuinely disagree.
+- Tell research subagents explicitly: "do NOT spawn subagents; do the searching yourself; return the actual findings."
+- If you resume a delegating agent, give the resumed run a DIFFERENT output path. Otherwise, re-read the file afterwards and grep for a marker unique to each version before trusting it.
+- Treat "I'll report back" in a final message as a failed agent, not a partial one.
+- In single-turn headless sessions, blocking on a delegating parent returns only its non-answer. The grandchildren may still finish and show up as separate top-level task notifications. Watch for those before synthesizing, instead of writing the whole branch off as failed.
 
-And: do not accept a verifier correction without checking it either. One correction claimed a `-0` normalisation was a no-op since `-0 === 0`. True on production render paths, but `assert.strictEqual` uses `Object.is`, where `Object.is(-0, 0)` is false, so it was load-bearing for the suite.
+## Mid-run redirects land late
 
-### Brief a verifier with the same preconditions the artifact states, or it refutes a claim you never made
+A message sent to a running subagent is queued and delivered at its next tool round. A redirect that changes an output path may arrive after the agent has already written the file.
 
-A verifier given the branch and the claim, but NOT the precondition the claim is scoped to, will test the unconditional version, find it false, and return a confident REFUTED wrapped around several correct minor findings. The headline is wrong and the details are right, which is the most expensive shape of feedback to receive because it is tempting to reject the whole thing.
+- Get output paths right in the spawn prompt. List the destination directory FIRST, including files other sessions added recently, so you don't collide with existing names.
+- If a mid-run rename can't be avoided, plan to `mv` the file afterwards and `sed` its self-references and H1, then re-check any docs that cite the old name.
+- Content redirects (add a source, skip a section) are more likely to land because they affect later steps. Send those early and keep them short.
 
-Concrete shape: a PR documented at length, with curl output, that its fix only becomes reachable once a SECOND open PR merges (that PR converts a 500 into an empty 200). Every browser result in the PR body was captured against `branch + other-PR`. The verifier prompt described the claim and the branch but never mentioned the other PR, so it tested the branch against the base alone, hit the 500, and reported the fix "can never render in production" as a fatal finding. That was the PR's own documented caveat handed back as a refutation.
+## Fan-out prompts carry the hard rules verbatim; assert coverage before reporting
 
-What to do:
+Subagents don't inherit a skill or ruleset that the orchestrator has loaded. If the orchestrator knows a rule (e.g. "always wrap OR terms in braces or parentheses in search queries", "fetch the full thread before concluding a negative") and the subagents never see it, they write queries that silently exclude real matches and report false negatives. As an example of that failure, many search engines parse `a OR b c` as `(a OR b) AND c`.
 
-- Put the preconditions IN the verifier prompt, not just in the artifact: which other branches are assumed merged, which env/flags, which build. "Verify commit X" is underspecified whenever X's correctness is conditional.
-- Say explicitly what environment your own evidence was gathered in, so a mismatch shows up as a disagreement about setup rather than about the claim.
-- When a verdict comes back REFUTED, check FIRST whether it evaluated the same configuration you did. If not, the verdict is about a different artifact; the sub-findings may still be entirely valid and should be triaged individually rather than dismissed with the headline.
-
-The corollary is the more useful half: in that same run the verifier's minor findings were all correct (an "A and B both fire" claim about two mutually exclusive branches, an "only a reload can fix it" claim when a route remount also cleared the state, and an unreachable `??` fallback). Those were prose written loosely enough that the agent's OWN screenshot contradicted it. A wrong headline verdict does not license discarding the details.
-
-### A research subagent can delegate instead of researching, and the orphaned child later overwrites the shared output file
-
-A subagent given a research prompt spawned its own subagent and returned a status update ("I've launched an agent, I'll report back") as its final answer. Resuming the parent with "do not delegate, do it yourself" worked, but the orphaned child could not be cancelled from the parent and kept running against the SAME output path, landing on top of the resumed parent's file about 90 seconds later.
-
-Why: a subagent's final message is its return value, so a status update is a null result that costs a full agent's runtime. And two agents pointed at one file path is a last-writer-wins race with no error.
-
-How to apply: (1) tell research subagents explicitly "do NOT spawn subagents, do the searching yourself, return the actual findings"; (2) if you must resume a delegating agent, give the resumed run a DIFFERENT output path, or re-read the file afterward and check which version landed (grep for a marker unique to each version) before trusting it; (3) treat "I'll report back" in a final message as a failed agent, not a partial one.
-
-### A SendMessage redirect to a running subagent lands only at its next tool round
-
-A subagent was told at spawn to write `10_CURRENT_STATE.md`. Two later SendMessage redirects (to `11_`, then `12_`, because sibling files with those prefixes existed) were acknowledged as delivered to its inbox, but the agent still wrote `10_CURRENT_STATE.md` and reported that path; it had drained the mailbox after the Write. Messages enqueue and drain at the receiver's next tool round, so a redirect that changes an output path is only reliable if it arrives before the agent reaches the writing step, which the sender cannot observe.
-
-Rule: (a) get output paths right in the spawn prompt (list the destination dir FIRST, including files other sessions added recently); (b) if a mid-run rename is unavoidable, plan to `mv` afterward and `sed` the self-references and the H1, and re-check any docs that cite the old name; (c) content redirects (add a source, skip a section) are more likely to land because they apply to later steps, so send those early and keep them short.
-
-### In headless single-turn sessions, blocking on a delegating subagent yields its orphan non-answer
-
-In a single-turn headless session, Agent calls launch async. If a subagent itself delegates to children and ends with "I will wait for their reports", blocking on that PARENT via TaskOutput returns only the parent's non-answer. The grandchildren keep running and surface to the TOP-LEVEL orchestrator as separate task-notification events, which ARE usable.
-
-Apply: (1) instruct subagents to do the work themselves, not delegate; (2) if a subagent returns a "waiting on children" non-answer, watch for the grandchildren's task-notifications before synthesizing rather than treating it as failed.
-
-### Fan-out prompts must carry the loaded skill's hard rules verbatim, and the orchestrator must assert a coverage count over the population
-
-An orchestrator loaded a skill that mandated brace-OR email queries and a full-thread read before recording any negative result, but its four search subagents never saw those rules and wrote queries like `foo OR "bar baz" quux`. The search backend parsed `a OR b c` as `(a OR b) AND c`, so four genuine rejection emails were excluded and reported as "silent". A fifth active row was never queried at all because the target list was hand-built with no count check.
-
-Rules: (1) a skill's hard rules are not inherited by subagents; paste them into every fan-out prompt. (2) Define the population (for example, every row where Active = Y) up front, print its size, and gate the report on every member appearing exactly once. (3) For status sweeps over a system that emits from a known sender, query by sender address AND entity name, never by role/title phrase; notifications rarely repeat the title.
+1. **Paste the skill's hard rules into every fan-out prompt.** Don't assume they carry over.
+2. **Define the population up front** (e.g. every row where Active=Y), print its size, and don't report until every member has appeared exactly once in the results. A target list built by hand with no count check will miss items.
+3. **When sweeping for outcomes in email or notifications, query by sender and entity name**, not by a phrase you expect in the body. Automated messages rarely repeat the exact title or wording you're searching for.
