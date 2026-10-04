@@ -1,18 +1,18 @@
-<!-- Load when: several sessions share one checkout; worktrees, resource locks, claim guards, "it keeps reverting" -->
+<!-- Load when: several sessions share one checkout; worktrees, resource locks, claim-guard, "it keeps reverting" -->
 # Concurrent Sessions on the Same Repo
 
-When several Claude sessions run at once on one machine, often with permissions skipped, they end up sharing one checkout per repo. They collide again and again. A fix that only detects the collision makes the race window smaller but never closes it.
+When several agent sessions run on one machine at once, often with permission prompts disabled, and they all share one checkout per repo, they collide. Each detection-based fix narrows the window without closing it.
 
-**It keeps coming back because it is two problems, and one mechanism was being asked to solve both.**
+**It keeps recurring because there are two problems, and one mechanism keeps getting asked to solve both.**
 
 | | Problem A: shared working tree | Problem B: singletons |
 |---|---|---|
-| What | N sessions, one checkout. The index and working tree are shared, changeable state that nobody owns. | Deploy target directories, process-manager services, a live browser extension, a shared skills directory, a remote server. Exactly one of each exists. |
+| What | N sessions, one checkout. The index and working tree are mutable shared state that nobody owns. | Deployed app directories, process-manager services, a live browser extension, a shared skills directory, a remote server. Exactly one of each exists. |
 | Symptom | `git add -A` commits someone else's uncommitted work; two sessions commit the same file seconds apart. | One session's deploy overwrites another's; two extension reloads tear down each other's service worker. |
-| Right fix | **Remove the sharing** (a git worktree per session). | **Serialize** (a real lock) or **partition** (one owner per path). |
-| Wrong fix | Detection. It can only narrow the race. | Advisory warnings. You can proceed past them, so nothing gets serialized. |
+| Right fix | **Eliminate the sharing** (a git worktree per session). | **Serialize** (a real lock) or **partition** (one owner per path). |
+| Wrong fix | Detection. It can only narrow the race. | Advisory warnings. A session can proceed past them, so nothing is serialized. |
 
-A claim guard (a hook that warns when another session has touched the file you are editing) is useful and catches real hazards. But it is detection, applied to both columns. Keep it as the backstop, not the strategy.
+A claim/edit-detection hook (one that records which session touched which file and warns or blocks on overlap) is worth having, and it does catch real hazards. But it is detection, and it gets applied to both columns. Keep it as the backstop, not the strategy.
 
 ## Problem A: use a worktree per session
 
@@ -22,131 +22,126 @@ EnterWorktree                 # creates .claude/worktrees/<name> on a new branch
 ExitWorktree { action: keep|remove }
 ```
 
-**`EnterWorktree` is often unavailable, and a rule that assumes it will be there gets skipped.** The tool needs the session's cwd to be inside a git repo. Sessions launched from a directory that is not a repo, or sessions that work across several repos, cannot use it. An instruction nobody can follow is worse than no instruction: it gets skipped without anyone noticing, and that weakens the rest of the file.
+**`EnterWorktree` is often unavailable.** The tool needs the session's cwd to be inside a git repo. Sessions launched from a non-repo directory, or sessions that span several repos, can't use it. If the rule depends on a tool that can't be used, sessions skip it silently, and that teaches them to ignore the rest of the file.
 
-The mechanism is git worktrees. `EnterWorktree` is just one convenient wrapper around them. From anywhere:
+The underlying mechanism is git worktrees, and `EnterWorktree` is only one wrapper around it. This works from anywhere:
 
 ```bash
-git -C "$HOME/<repo>" worktree add .claude/worktrees/<n> -b <n>
+git -C $HOME/<repo> worktree add .claude/worktrees/<n> -b <n>
 # then edit via $HOME/<repo>/.claude/worktrees/<n>/...
-git -C "$HOME/<repo>" merge --no-ff <n> && git -C "$HOME/<repo>" push
+git -C $HOME/<repo> merge --no-ff <n> && git -C $HOME/<repo> push
 ```
 
-This works from a non-repo cwd and across repos. Any guard hook you run should decide isolation from the target file's path, not from the cwd, so that a worktree path counts as isolated wherever the session started. An "unpushed commits" check should also scan worktrees, so a commit left stranded in one gets caught.
+Any guard hook should decide whether you are isolated from the **target file path**, not from cwd, so a worktree created from a non-repo cwd still counts as isolated. An unpushed-commit checker should also scan worktrees, or commits get stranded there.
 
-With a worktree, no other session's uncommitted work is in your tree. `git add -A` is then safe **by construction**, and the whole class of collision goes away.
+Once you work in a worktree, no other session's uncommitted work is in your tree. `git add -A` is then safe **by construction**, and that whole class of bug goes away.
 
-Why this is cheaper than it looks: the worktrees live under `.claude/worktrees/`, so the canonical checkout **stays exactly where it is**. Crontab lines and process-manager configs that hardcode the canonical path keep working without changes. They actually improve: crons now run against a clean committed tree instead of one that several sessions are editing at once.
+It costs less than you'd expect. Worktrees live under `.claude/worktrees/`, so the canonical `$HOME/<repo>` checkout **stays exactly where it is**. Cron jobs and process-manager configs that hardcode the canonical path keep working. They actually improve, because they now run against a clean committed tree instead of one that several sessions are editing.
 
-Real costs:
-- Each session ends with a merge back to the default branch. That is extra ceremony for solo work.
-- Git refuses to check out the same branch in two worktrees. This is a feature (it forces a branch per session), but it changes behavior.
+The real costs:
+- Every session ends with a merge back to the default branch, which adds ceremony to solo work.
+- Git refuses to check out the same branch in two worktrees. That is a feature (it forces per-session branches), but it changes behavior.
 - It does nothing for Problem B.
-- Separate clones are not affected either way. A second clone of the same repo (for example, one on another filesystem that a browser loads an extension from) still has to be pulled before it is used.
+- A separate clone, such as a checkout on another filesystem used to load a browser extension, is unaffected either way. You still have to pull it before reloading from it.
 
 ## Problem B: take a real lock
 
-Wrap every operation on a singleton in a named, blocking lock. `flock` is portable enough:
+Serialize every operation on a named singleton through one lock wrapper. A minimal portable version uses `flock`:
 
 ```bash
-mkdir -p /tmp/locks
-flock --timeout 600 "/tmp/locks/deploy:<app>.lock" -- <command...>
+# with-resource-lock.sh <resource> [--timeout N] -- <command...>
+mkdir -p /tmp/resource-locks
+exec flock -w "${TIMEOUT:-600}" "/tmp/resource-locks/${RESOURCE//[:\/]/_}.lock" "$@"
 ```
 
-A small wrapper script (`with-resource-lock.sh <resource> [--timeout N] -- <command...>`, plus a `--list` mode that shows who holds what) is worth writing. It lets you record the holder's PID and command next to the lock.
+Give it a `--list` mode that shows who holds what, by writing the holder's PID and command into the lock file.
 
-Keep the resource names stable, because the name string IS the lock:
+Keep the resource names stable, because the name string *is* the lock:
 
 | Resource | Covers |
 |---|---|
-| `deploy:<app>` | that app's deploy target directory and its service |
-| `browser-extension` | the live browser extension: reload, debugger protocol, tab state |
-| `remote:skills` | a skills or config directory synced to a remote host |
+| `deploy:<app>` | the app's deployed directory and its process-manager service |
+| `browser-extension` | the live browser extension: reload, debugging protocol, tab state |
+| `<host>:skills` | the skills directory on a remote host |
 
-Where to put the lock:
-- **In the tool itself** when possible. For example, an extension-reload command should wrap itself, with an env var to opt out.
-- **In the single entry point for the operation.** If every deploy goes through one deploy skill or script, put the lock there, not in ten per-repo `deploy.sh` files.
-- **In a sync script that replaces hand-run commands.** Have it verify the result too (for example, count files in every copy and fail on a mismatch).
+Where to wire it in:
+- The extension-reload command should wrap itself in the lock, with an env var to opt out.
+- The skills sync script should take the lock instead of a hand-run rsync. It should also count skill files across every copy and fail if the counts differ.
+- Deploys should take `deploy:<app>` inside the deploy skill or wrapper that every deploy already goes through, not in each repo's own deploy script.
 
 ## Diagnostic order when something "keeps reverting"
 
-Before blaming a cache or a cron:
+Before blaming a cache or a cron job:
 1. `stat` the origin file and compare its mtime with your deploy time.
-2. Run `git log -- <path>` and look for commits from other sessions.
-3. Map the live sessions (process list, or session-liveness marker files if your hooks write them).
+2. `git log -- <path>` to look for commits from other sessions.
+3. Map the live sessions (from session-alive marker files, process list, or your agent-listing tool).
 
-**Do not kill a live session to win a race.** It is usually the operator's own session. Check whether its tree is clean and pushed, then ask.
+**Never kill a live session to win a race.** It usually belongs to the human operator. Check whether its tree is clean and pushed, then ask.
 
 ## Deploy from the merged default branch, not from your worktree
 
-A worktree isolates your edits, which is the point. But its generated output (`dist/`, a build directory, an artifact) reflects only your branch. Deploying from it publishes a build that is missing whatever landed on the default branch while you worked. That quietly reverts features other sessions have already shipped.
+A worktree isolates your edits, which is the point. But its generated output (`dist/`, a build directory, an artifact) reflects only your branch. If you deploy from it, you publish a build that is missing whatever landed on the default branch while you worked. That silently reverts another session's shipped feature, and neither side notices.
 
 Do it in this order:
 
 1. Merge to the default branch (`git merge --no-ff <branch>`).
-2. **Regenerate** generated files there. Do not resolve them as text: a conflict in `dist/` is not a real conflict, it is a stale artifact.
-3. Run the test suites against the merged output, not the branch's.
+2. **Regenerate** generated files there instead of resolving them as text. A conflict in `dist/` is not a real conflict; it is a stale artifact.
+3. Run the test suites against the merged output, not against your branch's output.
 4. Deploy, then compare the live build stamp with the one you shipped.
 
-If you see a live build stamp you do not recognise, before or after your deploy, someone else deployed while you worked. This is the cheapest detector there is, and it only works if your builds carry a stamp.
+If the live build stamp is one you don't recognise, before or after your deploy, someone else deployed while you worked. This is the cheapest detector there is, and it only works if every build carries a stamp.
 
 ## A relative-path shell edit runs in the shared checkout, not your worktree
 
-A worktree protects you from a commit that stages everything. It does **not** protect you from a shell command that works out its own path.
+A worktree protects you from a stage-everything commit. It does **not** protect you from a shell command that resolves a path on its own.
 
-Here is how it fails. You edit a file correctly in the worktree using an absolute path. Then a follow-up `perl -0pi -e 's/.../.../' src/server.js` uses a **relative** path. The shell's cwd has reset to the repo root between tool calls, so the substitution rewrites the **shared main checkout**, and the worktree file never gets edited.
+Here is the failure mode. You edit a file correctly in the worktree using an absolute path. A follow-up `perl -0pi -e 's/.../.../' src/server.js` uses a **relative** path. The shell's cwd has reset to the repo root between tool calls, so the substitution rewrites the **shared main checkout**, which now references a constant that exists only in the worktree. The worktree file never gets edited.
 
-Both checks look green:
-- `node --check` passes on the contaminated file. It only parses syntax and never resolves identifiers, so a file that references an undefined constant passes and fails only at runtime.
+Both checks report green:
+- `node --check` passes on the contaminated file. It parses syntax and never resolves identifiers, so a reference to an undefined constant fails only at runtime.
 - The confirming `grep` finds the substitution, but in the wrong tree.
 
-The failure shows up much later, as an error that seems unrelated.
+The failure surfaces much later as an unrelated-looking error (for example `spawn ENOENT` from a test that should have picked up the change).
 
 Rules:
-1. **Use absolute paths for every scripted edit in a worktree** (`perl`, `sed`, `awk`, `mv`, `cp`), not just in the editor tool. A relative path is safe only when the same command sets the cwd again.
-2. **Check that the shared checkout is still clean after any scripted in-place edit.** `git -C <worktree> diff --stat` shows what you meant to change; `git -C <main-checkout> status --short` shows what you did not mean to change. This is the only check that catches this failure.
-3. **Undo a leak surgically** by inverting the same substitution. `git checkout -- <file>` in a shared checkout would also throw away another live session's uncommitted work in that file.
+1. **Use absolute paths for every scripted edit in a worktree** (`perl`, `sed`, `awk`, `mv`, `cp`), not just for the editor tool. A relative path is safe only when the same command sets cwd first.
+2. **After any scripted in-place edit, check that the shared checkout is still clean.** Run `git -C <worktree> diff --stat` for what you meant to change and `git -C <main-checkout> status --short` for what you didn't. This is the only check that catches the leak.
+3. **Revert a leak surgically** by inverting the same substitution. `git checkout -- <file>` in a shared checkout would also throw away another live session's uncommitted work in that file.
 
 ## Rule Digest
 
-**Setup and hygiene**
-- **Ignore `.claude/worktrees/` in your global gitignore** (`core.excludesFile`) on every host, so no repo needs its own step.
-- **`node_modules/` with a trailing slash does not match a `node_modules` symlink.** If you symlink deps into a worktree, `git add -A` will stage the link. Use `node_modules` without the slash.
-- **Clear out stale session ledgers on a schedule**, with a hard minimum age so the guards never go blind. Alert on how often a guard gets overridden, not on how often it denies.
-- **A main checkout left on a stray, already-merged branch serves stale CLAUDE.md content.** Check `git branch --show-current` before reporting a documentation gap.
-- **Before starting work in a shared folder, look for a parallel workstream:** `git log --since=<recent>` on the folder, any matching deliverables directory, and idle peer agents.
+One line per lesson.
 
-**Landing a branch**
-- **Never merge from the shared checkout.** `cd <primary> && git merge <my-branch>` merges into whatever branch is checked out right now, which may not be the one that was there when you started.
-- **Land from a dedicated landing worktree that stays detached.** Checking out the default branch by name inside it defeats the point. Use `git worktree add <path> origin/<branch> --detach`, merge, then `git push origin HEAD:<branch>`.
-- **Name the remote ref explicitly.** `git worktree add <path> <branch> --detach` can resolve to a stale local ref even right after `git fetch origin <branch>`.
-- **When the default branch moves fast, land with a fast-forward push to the remote** and deploy files from the latest `origin/<branch>`, not from your local copy.
-- **A push from the landing worktree does not fast-forward any other long-lived checkout of the same repo.** Pull it explicitly if something reads from it.
-- **A branch that was cut before another session's additions can delete them on merge.** Rebase onto the latest default branch and read the diff against it before landing.
-- **A worktree guard blocks resolving a merge conflict in the canonical checkout.** Resolve it in the worktree branch instead.
-
-**The shared index and working tree**
-- **`git add` works on a shared staging area.** A pre-commit secret gate can block YOUR commit because of a peer's staged content, and a plain commit can sweep in a peer's staged files. Commit with `git commit --only <paths>`.
-- **`git reset --hard` in a shared checkout throws away every session's uncommitted work on every tracked file,** not just the file causing your conflict. Never run it there.
-- **Keep copies of in-progress scripts outside the checkout (a scratch directory).** If a peer resets the shared tree, rebuild from those copies and commit from a worktree.
-- **A sibling's work that was `git add`-ed and then reverted can be recovered from the dangling blob:** `git fsck --lost-found`.
-- **A "stray" uncommitted change may be a live peer's in-flight edit** that will commit mid-task and move HEAD. Do not clean it up.
-- **When a guard fires, first check whether the flagged edit is committed or uncommitted.** The guard can fire on the claim ledger even after the sibling has committed.
-- **A worktree cannot see an edit that exists only in a sibling's uncommitted working tree.** Wait for the commit or ask.
-- **If a LIVE session is mid-edit on your exact file, branch from the committed HEAD and push a branch.** Do not merge while the other session is still writing.
-
-**Deploys and singletons**
-- **A deploy of the same app with no lock can stop production and wipe and rebuild a shared staging directory mid-build.** That leaves production down with a partial build. Always take `deploy:<app>`.
-- **An rsync deploy from the shared checkout can ship a file with conflict markers in it.** Run `grep -rn '^<<<<<<<\|^>>>>>>>'` over the payload before syncing.
-- **The deployed file can be a third, separate version** that matches neither your branch nor the default branch. Build the deploy artifact from the deployed file plus only your hunks, and deploy only the files you changed while other sessions are active.
-- **A Next.js standalone build inside a worktree nests its output under the worktree path.** Never deploy those artifacts.
-- **A runner's own lock file does not stop a second invocation launched by hand.** The manual path has to take the same lock.
-- **A check that says "is the runner lock held by a duplicate?" run by the lock holder's own child process will find itself.** Exclude your own PID ancestry before reporting BLOCKED.
-- **Two agents driving one browser profile must claim their targets in a shared file before the first form fill.** Read the claims file first, or you will duplicate a sibling's actions.
-
-**Duplicate dispatch**
-- **A message sent twice, a retry or troubleshoot flag, or a parallel session picking up the same task can start two agents on one deliverable.** One of them may merge a competing PR and reset the shared checkout under the other. Check for a sibling working on the same task before you start, and again before you land.
-
-**Verifying the environment**
-- **Bridging a local session to a web UI can quietly drop the permission mode.** Check the active mode after bridging.
-- **Verify a Claude Code settings change with a headless `claude -p` A/B run**, not by reading the transcript.
+- **Ignore worktree directories globally.** Put `.claude/worktrees/` in a global gitignore on every host, so no repo needs its own step.
+- **Never land a branch by merging from the shared checkout.** `cd <primary> && git merge <my-branch>` merges into whatever branch is checked out *now*, which may not be the one that was there when you started. Land from a dedicated landing worktree, or push your branch and fast-forward the remote.
+- **Don't check out the default branch by name inside the landing worktree.** That reintroduces the shared-branch problem the worktree was meant to avoid. Use a detached HEAD at `origin/<default>`.
+- **A push from the landing worktree doesn't update other long-lived checkouts of the same repo.** Pull them explicitly if a cron job or service reads from them.
+- **`git worktree add <path> <branch> --detach` can resolve to a stale LOCAL ref even right after `git fetch`.** Name `origin/<branch>` explicitly.
+- **A runner's own lock file doesn't stop a second invocation launched by hand.** The manual path has to take the same lock.
+- **Hygiene:** reap stale session ledgers on a schedule, with a hard minimum age so the guards are never blinded. Alert on a guard's override rate, not its deny count.
+- **A main checkout left on a stray, already-merged branch serves stale instruction files.** That shows up as a false "undocumented gap". Check `git branch --show-current` before you trust what you read there.
+- **A `node_modules/` gitignore rule (trailing slash) doesn't match a `node_modules` symlink.** Linking dependencies into a worktree makes the symlink stageable by `git add -A`. Add a slash-less `node_modules` rule as well.
+- **A Next.js standalone build inside a worktree nests its output under the worktree path.** Never deploy those artifacts. If `test -f .next/standalone/server.js` fails, check where `server.js` actually landed before you call it a build defect.
+- **`git add` shares one staging area.** A pre-commit secret scan can block *your* commit over a peer session's staged content. Commit from a worktree, or use `git commit --only <paths>`.
+- **`git reset --hard` in a shared checkout discards a peer's uncommitted work on every tracked file,** not just the file causing your conflict. Never run it there.
+- **Two agents on one browser profile must claim targets in a shared claims file before the first form fill.** Otherwise they duplicate each other's submissions. Read the claims file first.
+- **Deploying by rsync from the shared checkout can ship a file that still has conflict markers.** Grep for `^<<<<<<<` before every rsync deploy.
+- **A branch that predates a concurrent session's additions deletes them when merged.** Rebase or merge the latest default branch into your branch first, and review the diff for deletions you didn't make.
+- **A deploy without a lock can collide with another deploy of the same app.** One can stop production and wipe or rebuild the shared build directory while the other is mid-build, leaving production down with a partial build. Always deploy under `deploy:<app>`.
+- **A lock holder's own child process can see the lock and report itself as a duplicate.** Exclude your own PID ancestry before reporting BLOCKED.
+- **Before starting work in a shared folder, check for a parallel workstream.** Run `git log --since` on the folder, check the matching deliverables directory, and list idle peer agents.
+- **Bridging a local session to a web UI can silently drop its permission mode.** Re-check the mode after bridging.
+- **A worktree guard can keep firing on the claim ledger after the sibling session has committed.** Check whether the sibling's work is committed before you override it.
+- **A worktree can't host an edit that exists only in a sibling's uncommitted working tree.** Wait for the commit, or coordinate with that session.
+- **If the guard blocks you from resolving a merge conflict in the canonical checkout, resolve it on your worktree branch instead.**
+- **Verify a settings change with a headless A/B run** (`claude -p` with and without the change), not by reading a transcript.
+- **If a LIVE session is mid-edit on your exact file, branch from committed HEAD and push a branch.** Don't merge under an active writer.
+- **If a peer's `git reset --hard` erased your uncommitted work, rebuild from scratchpad copies and commit from a worktree.** Keep scratch copies of non-trivial scripts for exactly this case.
+- **A parallel session can merge a competing PR for the same task and reset the shared checkout,** silently discarding your uncommitted edits. Commit early on your own branch.
+- **When a worktree guard blocks you, check whether the conflicting work is committed or uncommitted before choosing a path.** Under concurrency, deploy only the files you changed.
+- **A "stray" uncommitted change in a shared checkout can be a live peer's edit in progress.** It may commit mid-task and move HEAD. Don't clean it up.
+- **On a fast-moving shared default branch, land by fast-forward push to the remote,** and deploy the file from the latest `origin/<default>`.
+- **The deployed file can be a third divergent state.** Build the deploy artifact from the deployed version plus only your hunks.
+- **Use `git commit --only <paths>` in a shared checkout** so you don't sweep up a sibling's staged files. If a sibling's work was staged and then reverted, recover it from the dangling blob (`git fsck --lost-found`).
+- **A request sent twice spawns two concurrent agents that race on the same deliverable.** Dedupe incoming requests before dispatching them.
+- **A follow-up "troubleshoot" request can race the original handler on the same file.** Check whether the original handler is still running before you start.
