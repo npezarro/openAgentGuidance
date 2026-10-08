@@ -5,92 +5,103 @@ Capture operational learnings, behavioral adjustments and discovered patterns **
 
 ## The Multi-Destination Rule
 
-A learning can belong in up to four places. Check which ones apply every time:
+A learning can go to up to four places. Check every one of them each time:
 
 | Destination | What Goes Here | Who Benefits |
 |---|---|---|
-| **Memory** (`~/.claude/projects/.../memory/`) | Personal recall across sessions | This user's future Claude sessions |
-| **Project repo** (`CLAUDE.md`, `context.md`) | Rules and patterns for one repo | Any agent working in that repo |
+| **Memory** (your agent's per-user memory directory) | Personal recall across sessions | This user's future sessions |
+| **Project repo** (`CLAUDE.md`, `context.md`) | Rules and patterns specific to that repo | Any agent working in that repo |
 | **This repo or your private context repo** | Patterns and operational knowledge that apply across projects | All agents, all repos, all sessions |
-| **Your knowledge base** | Synthesized knowledge that spans 3 or more repos | Any agent that needs cross-cutting context |
+| **Your knowledge base** | Cross-repo knowledge, used when a learning spans 3+ repos | Any agent that needs cross-cutting context |
 
-This rule applies to interactive sessions as well as autonomous ones. If an automated scorer or review pass does not check a rule for some session type, that only means a different pass is responsible for catching the gap. It does not mean you can skip the behavior.
+The rule still applies when no automated check or score enforces it in a given session type. If nothing scores you on it, that only means some other pass is meant to catch the gap. The gap is still real.
 
 ### Decision: this repo vs your private context repo
 
-- **This repo** (may be published): behavioral rules, workflow patterns, techniques, prompt strategies and integration patterns. Nothing that reveals infrastructure, credentials or sensitive identifiers.
-- **Your private context repo**: prompt templates that contain sensitive details, credential patterns, infrastructure-specific knowledge, and project-specific operational details that name internal systems.
-- **When in doubt:** if it mentions a hostname, IP, username, API key or private repo name, it goes in your private context repo.
+- **This repo** (shareable): behavioral rules, workflow patterns, techniques, prompt strategies, integration patterns. Nothing that reveals infrastructure, credentials or sensitive identifiers.
+- **Your private context repo**: prompt templates that contain sensitive details, credential patterns, infrastructure-specific knowledge, and operational details that name internal systems.
+- **When in doubt:** if it mentions a hostname, IP, username, API key or private repo name, it goes in the private context repo.
 
 ## What Counts as a Learning
 
-- A behavior to repeat or avoid in future sessions
-- A new capability, tool or integration pattern that has been set up
-- A correction from the user, whether stated or implied
+- Behavior to repeat or avoid in future sessions
+- A new capability, tool or integration pattern you set up
+- A correction from the user, explicit or implied
 - A failure mode you found, along with its fix
-- A prompt strategy or framing that gave better results
-- An infrastructure detail that future sessions will need
+- A prompt strategy or framing that worked better
+- An infrastructure detail future sessions will need
 - A change to an existing rule based on new evidence
 
 ## When to Capture
 
-Capture it **immediately**, not at session end. In particular:
+**Right away**, not at session end. In particular:
 
-1. **User corrects you:** save the feedback before you continue with the corrected approach.
-2. **New capability established:** once you have verified it works, record it before moving on.
-3. **Pattern discovered:** once the pattern is confirmed, persist it.
-4. **Integration wired up:** once it is tested, document the wiring.
+1. **The user corrects you:** save the feedback before you continue with the corrected approach.
+2. **You set up a new capability:** once it is verified to work, record it before moving on.
+3. **You discover a pattern:** once the pattern is confirmed, persist it.
+4. **You wire up an integration:** once it is tested, document the wiring.
 
-Do NOT batch these up for session wrapup. By then the details are gone and the learning is less precise.
+Do NOT batch these for session wrapup. By then the details are gone and the learning is less precise.
 
 ## How to Capture
 
 ### Preferred: a single propagation command
 
-If your setup has a propagation script that writes to memory, the repo `CLAUDE.md` and a guidance file in one step, use it. Give it a type, a one-line summary, the full body, the target repo and the target guidance file. Use its dry-run mode first when one exists.
+If your setup has a propagation script that writes memory, the repo `CLAUDE.md` and a guidance file in one step, use it. It is the fastest and most reliable path. A typical interface looks like this:
 
-**Know whether your script appends or queues.** Some setups send guidance-file learnings to an inbox that no session loads, and a later consolidation pass merges them into the target file. In that case the lesson is saved right away but only reaches the loaded file on the next pass. If a session needs the rule in force now, edit the target file directly on a branch or worktree. Merge the lesson into an existing rule instead of adding a new dated section, and keep the file's net growth small.
+```bash
+./scripts/propagate-learning.sh \
+  --type feedback \
+  --summary "One-line description" \
+  --body "Full learning content" \
+  --repo <repo-name> \
+  --guidance-file guidance/<relevant-file>.md
+```
 
-**Watch for direct pushes to `main`.** A propagation script that runs `git commit && git push` inside a guidance repo will commit straight to `main` whenever `main` is checked out, which skips PR review. For guidance edits that should be reviewed, work in a worktree on a learnings branch. Direct pushes are fine for private destinations that have no review gate.
+Useful flags: `--private` routes to the private context repo, `--cross-cutting` flags the learning for the knowledge base, and `--dry-run` previews the result.
 
-For complex or nuanced learnings, hand the routing decision, duplicate check and manifest lookup to a dedicated propagation subagent.
+**Find out whether the script appends or queues.** Some setups send guidance learnings to an inbox file that no session loads, and a later consolidation pass merges them into the target file. In that case the lesson is saved right away but does not take effect until that pass runs. If a session needs the rule in force now, edit the target file directly on a branch. Merge into an existing rule rather than adding a dated section, and stay within any size limit the guidance files have.
 
-### Manual Capture (when a script doesn't fit)
+**Watch for scripts that commit and push straight to `main`.** If a helper runs `git commit && git push` in a clone where `main` is checked out, every learning it writes skips PR review. For guidance edits that should be reviewed, work in a worktree on a learnings branch instead. Direct pushes are fine for destinations that have no review gate, such as memory or private repo `CLAUDE.md` files.
+
+For complex or nuanced learnings the script can't handle, hand the job to a dedicated propagation agent if you have one. It can make the routing decisions, check for duplicates and look up the right file in your guidance index.
+
+### Manual Capture (when the script doesn't fit)
 
 #### Step 1: Save to memory (always)
 Write a standard memory file with frontmatter.
 
 #### Step 2: Pick the repo-level destination(s)
 
-| Learning Type | Repo Destination | This repo / private context repo? |
+| Learning Type | Repo Destination | Shared guidance / private context? |
 |---|---|---|
 | Repo-specific rule | That repo's `CLAUDE.md` | Only if it is a cross-project pattern |
 | Workflow pattern | N/A | `guidance/<topic>.md` in this repo |
-| Prompt template | N/A | `prompts/<name>.md` in your private context repo |
+| Prompt template | N/A | A prompts directory in your private context repo |
 | Infrastructure detail | N/A | An infrastructure or accounts file in your private context repo |
-| User preference/style | N/A | A voice/style guidance file in this repo |
+| User preference or style | N/A | A voice/style guidance file in this repo |
 
 #### Step 3: Commit and push
-Push learnings to this repo or your private context repo right away. A learning that only exists locally does nothing for other sessions.
+Push learnings committed to this repo or the private context repo immediately. A learning that only exists locally helps nobody.
 
 ## Updating Existing Guidance
 
 When a learning changes or extends an existing rule:
-1. **Find the canonical source** in the repo's manifest or index.
-2. **Edit it in place.** Do not create a new file when an existing one already covers the topic.
+1. **Find the canonical source** in your guidance index or manifest.
+2. **Edit it in place.** Don't create a new file if an existing one already covers the topic.
 3. **Update the manifest** if you add a new guidance file.
-4. **Update the core instruction file's guidance index** if you add a new guidance file.
+4. **Update the guidance file index** in your core agent instructions if you add a new guidance file.
 
 ## Responding to Mistakes
 
-When you make a mistake and find its cause, do this before moving on:
+When you make a mistake and identify the cause, work through these steps before moving on:
 
-1. **Check existing guidance.** Search the guidance directory and your private context repo for a rule that should have prevented it.
-2. **If the rule exists:** work out why it wasn't followed. Maybe it is too narrow, or its trigger condition has a gap. Update the rule to close that gap.
-3. **If no rule exists:** add one in the right place (this repo for lessons that apply across sessions, the repo's `CLAUDE.md` for lessons specific to that repo).
-4. **Commit and push the rule update.** A rule that isn't pushed doesn't help future sessions.
+1. **Check existing guidance.** Search this repo's guidance and your private context repo for a rule that should have prevented the mistake.
+2. **If the rule exists:** work out why it wasn't followed. Is it too narrow? Does its trigger condition miss this case? Update the rule to close the gap.
+3. **If no rule exists:** add one in the right place (this repo for cross-session rules, the repo `CLAUDE.md` for repo-specific ones).
+4. **Commit and push the rule update.** Rules that aren't pushed don't help future sessions.
 
-**Why this matters:** when a rule exists but isn't followed, either the rule is unclear or its trigger is missing. Turn every failure into a better rule. Don't just fix the symptom; fix what should have prevented it.
+**Why this matters:** a rule that exists but wasn't followed points to an unclear rule or a missing trigger condition. Every failure should improve a rule. Don't just fix the symptom; fix what should have prevented it.
 
 ## Explicit User Directives ("Update Guidance", "Record This")
 
@@ -98,60 +109,59 @@ When the user says **"update guidance"**, **"record this into guidance"**, **"sa
 
 ### Routing Order for User Directives
 
-1. **Find the canonical source.** Check the manifest for the right file. If the directive maps to an existing guidance file, edit that file in place.
-2. **Update the repo file(s).** Edit the relevant guidance file, your private context repo, or the project's `CLAUDE.md`, whichever fits.
-3. **Update your knowledge base** if the change affects knowledge that spans repos (instruction architecture, integration patterns, or anything an existing article already covers).
-4. **Commit and push right away.** Rule changes that aren't pushed don't help future sessions.
-5. **Optionally save a memory file** as a personal index or cache. Memory is always supplementary and never the main destination.
+1. **Find the canonical source.** Check the manifest for the right file. If the directive fits an existing guidance file, edit that file in place.
+2. **Update the repo file(s).** Edit the relevant file in this repo's `guidance/`, your private context repo, or the project's `CLAUDE.md`.
+3. **Update the knowledge base** if the change affects cross-repo knowledge, such as instruction architecture, integration patterns, or a topic that already has a knowledge base article.
+4. **Commit and push** right away. Rule changes that aren't pushed don't help future sessions.
+5. **Optionally save a memory file** as a personal index or cache. Memory is extra, never the main destination.
 
 ### MEMORY.md Index Budget (hard constraint)
 
-`MEMORY.md` is loaded into context every session, so it has a real size limit (roughly 24KB and 200 lines). Past that limit the loader cuts off the end and drops entries without warning. Keep it healthy:
+`MEMORY.md` loads into context every session, so it has a real size limit (around 24KB). Past that limit the loader cuts off the end and silently drops entries. Keep the index healthy:
 
-- **One line per memory, with the whole line at about 128 characters or less.** Put the detail in the topic file, which is read on demand. Never put it in the index line.
-- **Assume some write paths have no length cap.** A script that appends to the index may truncate lines, but the built-in memory tool writes `MEMORY.md` directly and skips any such cap. Treat every index as if it may contain over-long lines. Something that runs every session, such as a SessionStart hook that re-compacts over-long lines, is what actually enforces the limit.
-- **Make compaction safe.** It should be idempotent and non-destructive: only trim the line text, never delete a memory file. Take a file lock on the index during compaction and appends so that concurrent writers (for example cron jobs) don't overwrite each other. Include a check mode that reports size and longest line and exits non-zero when the index is over the hard limit.
-- **Know the scope of the healer.** A per-session hook usually fixes only the current project's index. Other projects' indexes can grow over budget without anyone seeing it, so run a fleet-wide check explicitly when you want the whole picture.
-- **An over-long line should trigger compaction on its own, whatever the file size.** If compaction only runs after the index passes a soft size limit, an index under that limit collects uncapped lines forever. If an index "looks long" while still under budget, this is usually the reason.
-- **If the index is still over budget after compaction, prune it.** Truncating lines is not enough. Delete or merge memories that (a) repeat a rule that is already always loaded, (b) are marked superseded or stale, or (c) duplicate another memory. A memory that repeats always-loaded guidance adds nothing to recall. Move these to `memory/archived/` (which can be undone) instead of leaving orphaned index lines.
-- **Automate demotion only for reference-style memories.** It is reasonable to automatically move project and reference memories that have zero reads over a grace period (for example 14 days) into a lazy tier that can still be searched. Do NOT auto-prune feedback, rule or pattern memories. They work by being in context, so a zero read count says nothing about their value, and pruning them still needs manual judgement.
+- **One line per memory, with each line at most about 128 characters.** The detail goes in the topic file, which gets read on demand, never in the index line.
+- **Assume not every write path is capped.** A propagation script may truncate lines when it appends, but a built-in memory tool that writes `MEMORY.md` directly skips that cap. Assume any index contains over-long lines, and enforce the limit with a separate compaction step.
+- **Run a self-healing compaction step at session start.** It should be idempotent and non-destructive: it only trims index line text and never deletes a memory file. Have it and every appender take a file lock (for example `flock` on `MEMORY.md.lock`) so concurrent cron appends don't overwrite each other. Give it a `--check` mode that reports size and longest line and exits non-zero when the index is over the hard limit. If the hook only heals the current project's index, another project's over-budget index stays hidden during your sessions. Run the check across all indexes now and then.
+- **An over-long line triggers compaction on its own, whatever the file size.** If compaction only runs after the index passes a soft size limit, an index below that limit collects uncapped lines forever and never gets cleaned up.
+- **When compaction warns that the index is still over budget,** trimming isn't enough, so prune. Delete or merge memories that are (a) redundant with an always-loaded rule, (b) marked superseded or stale, or (c) duplicates. A memory that repeats an always-loaded rule adds nothing, because the rule is already in context every session. Move such memories to `memory/archived/`, which can be undone, rather than leaving orphaned index lines.
+- **Automate pruning only for project and reference memories.** A daily job can demote `project_`/`reference_` entries that have zero reads across session transcripts (after a grace period of about 14 days since they were last modified) into a lazy tier that recall can still search. The files stay on disk and a pointer line in `MEMORY.md` names the tier. Do NOT auto-prune feedback, rule or pattern memories. They work by being in context, so a zero read count tells you nothing about their value, and pruning them needs a manual judgement call.
 
 ### Common Mistakes to Avoid
 
 - **Updating only memory:** writing a memory file and stopping there. Other agents, and sessions that don't share your memory directory, can't see it. When the user says "update guidance", they mean the durable instruction system.
 - **Skipping the knowledge base:** if the topic already has a knowledge base article, update it along with the guidance file.
-- **Creating a new file when one already covers the topic:** always check the manifest and search the guidance directory first.
+- **Creating a new file when one already covers the topic:** always check the manifest and search `guidance/` first.
 
 ### Trigger Keywords
 
-Treat any of these as an instruction to update repo files:
+Treat any of these as a directive to update repo files:
 - "update guidance" / "add to guidance" / "record this into guidance"
 - "save this direction" / "save this rule"
 - "remember this for all sessions" / "make this permanent"
 - "add this to the rules" / "update the rules"
-- Any correction followed by "make sure this doesn't happen again"
+- Any correction plus "make sure this doesn't happen again"
 
 ## What NOT to Capture
 
-- One-off debugging steps (they are already in git history)
-- Code patterns you can see by reading the code
+- One-off debugging steps (git history already has them)
+- Code patterns anyone can see by reading the code
 - Task-specific context that won't come up again
 - Anything the destination file already documents
 
-## Shell Quoting: backticks in a double-quoted body get executed
+## A backtick inside a double-quoted shell argument is command substitution
 
-If a capture script takes the learning body as a normal shell argument, markdown with a backticked code span inside double quotes triggers command substitution. The span disappears, stderr shows something like `command not found`, and the empty result is written to every destination. The script still exits 0 and reports success, so you only see the damage by reading the written file.
+If a propagation script takes `--body` as a normal shell argument, markdown with a backticked code span inside double quotes gets run as command substitution. The span disappears, stderr shows something like "command not found", and the empty result is written to every destination. The script still exits 0 and reports success, so you can only spot the damage by reading the written file.
 
-This hits hardest on the learnings most worth saving, because those name a literal config key, flag or sentinel. The sentence loses the identifier it was written to name, yet it still reads as complete.
+This hits hardest on the learnings most worth saving: the ones that name a literal config key, flag or sentinel. The sentence loses the identifier it was written to name and still reads as complete.
 
-Avoid it with a heredoc whose delimiter is quoted. That form does no substitution at all:
+To avoid it, build the body with a quoted heredoc, which does no substitution at all:
 
 ```bash
 BODY=$(cat <<'EOF'
 ... markdown with backticks, $vars and "quotes" all literal ...
 EOF
 )
-your-capture-script --type pattern --summary "..." --body "$BODY"
+./scripts/propagate-learning.sh --type pattern --summary "..." --body "$BODY"
 ```
 
-If you can't do that, put double quotes around code spans in the body instead of backticks. Either way, **read back at least one destination file** after capturing. The exit code does not tell you whether the text survived.
+The heredoc delimiter must be quoted. If you can't use a heredoc, write code spans in the body with double quotes instead of backticks. Either way, **read back one destination file after propagating**. The exit code doesn't tell you whether the text survived.
