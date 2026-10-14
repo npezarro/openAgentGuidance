@@ -24,7 +24,8 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
 
 TRACK_FILE="/tmp/claude-repos-touched-${SESSION_ID}"
-[ -f "$TRACK_FILE" ] || exit 0
+COMMIT_LEDGER="/tmp/claude-commits-${SESSION_ID}"
+[ -f "$TRACK_FILE" ] || [ -f "$COMMIT_LEDGER" ] || exit 0
 
 ACK_FILE="/tmp/claude-repos-ack-${SESSION_ID}"
 ACK_LOG="$HOME/.claude/logs/git-push-gate-acks.log"
@@ -34,6 +35,33 @@ ack_reason_for() {
   [ -f "$ACK_FILE" ] || return 1
   awk -F'\t' -v target="$1" '$1 == target && $2 != "" { print $2; found=1; exit } END { exit !found }' \
     "$ACK_FILE" 2>/dev/null
+}
+
+# Label a worktree by its PROJECT, not by the worktree directory name: "probe (1)"
+# tells you nothing about which repo has stranded work. Checks still run against the
+# worktree itself: only the display name is resolved through the common git dir.
+repo_label() {
+  local name _common
+  name=$(basename "$1")
+  if [ -f "$1/.git" ]; then
+    _common=$(cd "$1" && git rev-parse --git-common-dir 2>/dev/null || echo "")
+    case "$_common" in
+      */.git) name="$(basename "$(dirname "$_common")") (worktree ${name})" ;;
+    esac
+  fi
+  printf '%s' "$name"
+}
+
+# Base to compare an unpushed range against when the branch has no upstream.
+remote_base() {
+  local base cand
+  base=$(git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo "")
+  if [ -z "$base" ]; then
+    for cand in origin/main origin/master; do
+      if git -C "$1" rev-parse --verify -q "$cand" >/dev/null 2>&1; then base="$cand"; break; fi
+    done
+  fi
+  printf '%s' "$base"
 }
 
 DIRTY_FILES=""
@@ -51,16 +79,7 @@ while IFS=$'\t' read -r repo_root file_path _epoch; do
   # worktree, so a -d test silently skips every per-session worktree
   # (guidance/concurrent-sessions.md) and the gate never sees that work at all.
   [ -e "$repo_root/.git" ] || continue
-  repo_name=$(basename "$repo_root")
-  # Label a worktree by its PROJECT, not by the worktree directory name: "probe (1)"
-  # tells you nothing about which repo has stranded work. Checks still run against the
-  # worktree itself: only the display name is resolved through the common git dir.
-  if [ -f "$repo_root/.git" ]; then
-    _common=$(cd "$repo_root" && git rev-parse --git-common-dir 2>/dev/null || echo "")
-    case "$_common" in
-      */.git) repo_name="$(basename "$(dirname "$_common")") (worktree ${repo_name})" ;;
-    esac
-  fi
+  repo_name=$(repo_label "$repo_root")
 
   # Check if this specific file has uncommitted changes
   rel_path=$(realpath --relative-to="$repo_root" "$file_path" 2>/dev/null || basename "$file_path")
@@ -133,7 +152,50 @@ while IFS=$'\t' read -r repo_root file_path _epoch; do
       [ "$theirs" -gt 0 ] && PEER_COMMITS="${PEER_COMMITS}${repo_name} (${theirs}), "
     fi
   fi
-done < "$TRACK_FILE"
+done < <(cat "$TRACK_FILE" 2>/dev/null)
+
+# Commits this session made itself (commit ledger from track-repo-writes.sh). This is
+# what catches Bash-written work: the per-file check above only sees Edit/Write paths.
+# A recorded commit counts as unpushed only if it is still live (reachable from the
+# checkout's HEAD or a local branch; an amended, rebased-away or deleted-branch commit
+# is not work to push), is on no remote-tracking ref, and has no patch-equivalent on the
+# remote base (a rebase or cherry-pick that landed). Squash merges are the known false
+# positive; ack them with a line `<repo_label>/commit:<sha7>\t<reason>`.
+declare -A SEEN_SHA 2>/dev/null || true
+declare -A COMMIT_COUNT 2>/dev/null || true
+if [ -f "$COMMIT_LEDGER" ]; then
+  while IFS=$'\t' read -r repo_root sha _epoch; do
+    [ -n "$sha" ] && [ -e "$repo_root/.git" ] || continue
+    [ -z "${SEEN_SHA[$sha]+x}" ] || continue
+    SEEN_SHA[$sha]=1
+    [ -n "$(git -C "$repo_root" remote 2>/dev/null)" ] || continue
+    git -C "$repo_root" cat-file -e "${sha}^{commit}" 2>/dev/null || continue
+    if ! git -C "$repo_root" merge-base --is-ancestor "$sha" HEAD 2>/dev/null \
+       && [ -z "$(git -C "$repo_root" branch --contains "$sha" 2>/dev/null | head -1)" ]; then
+      continue
+    fi
+    [ -n "$(git -C "$repo_root" branch -r --contains "$sha" 2>/dev/null | head -1)" ] && continue
+    base=$(remote_base "$repo_root")
+    if [ -n "$base" ] && git -C "$repo_root" cherry "$base" "$sha" "${sha}^" 2>/dev/null | grep -q '^-'; then
+      continue
+    fi
+    label=$(repo_label "$repo_root")
+    key="${label}/commit:${sha:0:7}"
+    if reason=$(ack_reason_for "$key"); then
+      ACKED_FILES="${ACKED_FILES}${key} (${reason}), "
+      mkdir -p "$(dirname "$ACK_LOG")" 2>/dev/null || true
+      printf '%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$SESSION_ID" "$key" "$reason" >> "$ACK_LOG" 2>/dev/null || true
+      continue
+    fi
+    COMMIT_COUNT[$label]=$(( ${COMMIT_COUNT[$label]:-0} + 1 ))
+  done < "$COMMIT_LEDGER"
+fi
+for label in "${!COMMIT_COUNT[@]}"; do
+  case "$UNPUSHED_REPOS" in
+    "${label} ("*|*", ${label} ("*) ;;  # already reported by the per-file check
+    *) UNPUSHED_REPOS="${UNPUSHED_REPOS}${label} (${COMMIT_COUNT[$label]}), " ;;
+  esac
+done
 
 MSG=""
 [ -n "$DIRTY_FILES" ] && MSG="Uncommitted files: ${DIRTY_FILES%, }. "
@@ -146,7 +208,7 @@ ACK_NOTE=""
 [ -n "$ACKED_FILES" ] && ACK_NOTE="Acknowledged as not-this-session work: ${ACKED_FILES%, }. "
 
 if [ -n "$MSG" ]; then
-  printf '{"decision":"block","reason":"GIT-PUSH GATE: %s%sCommit and push before stopping."}\n' "$MSG" "$NOTE"
+  printf '{"decision":"block","reason":"GIT-PUSH GATE: %s%sCommit and push before stopping. Then restate your full answer in the final message: headless consumers (chat bots, runners) post only the last message, and a bare commit line replaces the deliverable."}\n' "$MSG" "$NOTE"
 elif [ -n "$ACK_NOTE" ] || [ -n "$NOTE" ]; then
   # Nothing blocking, but keep the acknowledged paths and peer commits visible rather than silent.
   printf '{"systemMessage":"GIT-PUSH GATE: passed. %s%s"}\n' "$ACK_NOTE" "$NOTE"

@@ -29,12 +29,15 @@ i. Fact-bearing deliverables mark AI-generated facts and record every source: in
 - Do not claim a feature works until you have tested every user-facing URL, redirect chain, auth flow and edge case yourself. For OAuth, test the real sign-in POST and inspect the redirect sent to the provider; endpoint checks do not prove the flow.
 - Never claim a tool is unresponsive without showing the actual error; if the user says it works, retry at once. Never say "already handled" without pointing at the output that did it.
 - Never write "done" or "pushed" until the push ran in this turn and exited 0.
+- Before the final message, check every done/pushed/tested/verified claim against the exact tool-output line that proves it, per claim not per session. No supporting line: drop the claim or re-verify it first.
+- For a generated written deliverable (a doc, report or prep pack), that line must show the deliverable's own content (read the file, grep its expected sections). A directory listing, a file size or a process check proves the file exists, not that it is correct.
+- For asynchronously generated content (renders, long-running jobs): "submitted" or "generating" is not "done". Recheck completion before reporting it finished, and never state a duration, timestamp or "ready" claim the tool itself did not return.
 
 ## 5. Gather Context Before Diving In
 Before any task in a documented domain, read the relevant memory files, the repo `CLAUDE.md`, the domain's guidance files and knowledge-base pages. Read the project's auth conventions before writing any auth code, especially for an app served under a subpath.
 
 ## 6. Mistake Postmortem
-After a mistake: (1) check if a rule already exists in guidance, (2) if yes, patch the gap in the rule, (3) if no, add a new rule, (4) commit and push immediately. Don't just fix the symptom.
+After a mistake: (1) check if a rule already exists in guidance, (2) if yes, patch the gap in the rule, (3) if no, add a new rule, (4) commit and push immediately, (5) verify the commit actually landed (`git log -S '<text>' -- <file>` or `git show <sha> -- <file>`) before reporting the postmortem done; a session's own narrative is not evidence. Don't just fix the symptom.
 
 ## 7. Self-Service: Don't Ask Users for Mechanical Tasks
 Do mechanical work yourself (create the channel or webhook you need, open the browser tab, pull a repo you can reach, research the spec, sync changes across a shared mount before asking anyone to reload) and read a service's documented intended state before changing its config.

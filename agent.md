@@ -27,6 +27,9 @@
 
 ## Security
 - **No secrets in commits, PRs, logs, or context files. Ever.**
+- **To check a secret, assert presence; never render and redact.** A redaction pattern is a guess about output you have not seen, and when it misses it fails silently and open (`docker compose config` prints YAML `KEY: value`, not `KEY=value`). Use `[ -n "$VAR" ] && echo "set (len ${#VAR})"`, a `grep -c`, or a short hash. Details: `guidance/secrets-hygiene.md`.
+- **A public repo's commits are anonymous.** State the rule, not who asked for it: no quoted-and-attributed directives, no names of third parties, no private communities or message links. Keep the attributed version in your private notes. The `commit-msg` hook enforces part of this.
+- **Personal source material never lands in a public repo, even as data a tool consumes.** Writing samples, resumes, personal fixtures and profile context are content, not credentials, so no secret scan flags them; they leak by being committed as eval tasks, test fixtures or style guides. Keep them in a private repo, symlink them in, and default-deny the data directory in `.gitignore`.
 - **Audit before every commit.** Read the staged diff line by line, and read the commit message: it publishes exactly as widely as the diff does.
 - **Treat a shared staging area as hostile.** When other sessions or agents share a checkout, `git add -A` stages their work too. Add explicit paths.
 - **Assume anything published is permanent.** Deleting a public commit does not un-publish it; forks, caches and archives persist.

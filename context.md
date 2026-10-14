@@ -1,6 +1,8 @@
 # context.md
 
 ## Last Updated
+2026-10-14: hand-port pass. `hooks/track-repo-writes.sh` published and wired into `install.sh` as a PostToolUse hook (claim-guard and worktree-guard were installed but read ledgers nothing wrote, so they never fired); `check-unpushed.sh` gains the commit ledger so Bash-written commits trip the push gate. `ESSENTIAL.md` rule 4 gains per-claim, written-deliverable and async-completion checks, rule 6 gains a verify-it-landed step; `agent.md` gains three security bullets. Four guidance files added to the publish set: change-detection, shell-portability, goal-conditions, service-hardening. The private repo's scan exemption for private repos was deliberately NOT ported; public hooks keep scanning every repo.
+
 2026-09-25: `guidance/ESSENTIAL.md` rewritten from the source's new short form (each rule stated as its directive; the source moved rationale to a detail file so the always-loaded text stays under the 8,000-byte hook budget). Hook comments that named specific private projects replaced with generic examples; the publisher now screens every staged file regardless of extension and rejects files naming a private repo.
 
 2026-08-21: GitHub repo description replaced (it still described the superseded lessons model); portfolio now links here instead of the private source. Earlier: repo created, rebuilt from a lessons feed into the working harness, 19 guidance files published.
@@ -14,7 +16,7 @@ The **public mirror** of a private agent-guidance system. It is the harness itse
 ## Current State
 
 - **Live and public.** CI (`public-content-scan`) green. Anonymous read verified.
-- **20 guidance files** (19 synced + `ESSENTIAL.md`), 14 hooks + `lib/`, 8 subagent definitions, 4 templates, 3 scripts.
+- **24 guidance files** (23 synced + `ESSENTIAL.md`), 15 hooks + `lib/`, 8 subagent definitions, 4 templates, 3 scripts.
 - **`scripts/secret-scan.sh`** is the gate the git hooks call. Ships with credential patterns and `--selftest`. Verified: blocks 4 real credential shapes, passes tricky negatives including `export API_KEY="$SECRET_FROM_ENV"`.
 - **`scripts/install.sh`** is idempotent (7 hook entries before and after a re-run) and backs up `settings.json`.
 - **Git hooks verified end to end**: a commit containing a credential shape produced zero commits; an ordinary commit succeeded.
@@ -33,7 +35,7 @@ The repo **description**, topics and homepage never pass through git, so none of
 
 - `agent.md` and `guidance/ESSENTIAL.md` want a human read before this is shared widely. Highest-value, hand-written, unreviewed.
 - **Inbound link:** `portfolio` (public) links here from its README, `index.html`, the generated `projects/agent-guidance.html`, and variants `a/`, `b/`, `c/`. Its copy cites concrete counts (19 guidance files, 8 subagent definitions). If those counts change materially, that copy goes stale.
-- 19 of 48 source guidance files are published. Deployment, auth, chat-integration, blog-posting, browser-tooling and writing-voice files were excluded as infrastructure-specific. Restoring any is one line in the source repo's publish set.
+- 23 of 54 source guidance files are published. Deployment, auth, chat-integration, blog-posting, browser-tooling and writing-voice files were excluded as infrastructure-specific. Restoring any is one line in the source repo's publish set.
 - A rewrite is non-deterministic, so an unchanged file re-run produces slightly different text. The publisher only touches changed files, so this shows up as churn only when the source actually moved.
 
 ## Environment Notes

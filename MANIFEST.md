@@ -14,11 +14,12 @@ Wire `--check` into CI so a new guidance file cannot land undiscoverable. A file
 ## Guidance files
 
 <!-- BEGIN GENERATED guidance table (scripts/gen-manifest.sh) -->
-20 guidance files (20 indexed at SessionStart via `guidance/INDEX.md`, 0 cold). Descriptions come from each file's "Load when:" header.
+24 guidance files (24 indexed at SessionStart via `guidance/INDEX.md`, 0 cold). Descriptions come from each file's "Load when:" header.
 
 | File | Load when |
 |---|---|
 | `guidance/ESSENTIAL.md` | AUTO-LOADED at SessionStart: top most-violated rules |
+| `guidance/change-detection.md` | building or debugging anything that decides "did this change?": screen/file/page watchers, cache invalidation, sync, dedup, polling collectors |
 | `guidance/code-review.md` | self-review checklist before committing |
 | `guidance/concurrent-sessions.md` | several sessions share one checkout; worktrees, resource locks, claim-guard, "it keeps reverting" |
 | `guidance/context-progress.md` | context.md and progress.md specs |
@@ -27,6 +28,7 @@ Wire `--check` into CI so a new guidance file cannot land undiscoverable. A file
 | `guidance/dependencies.md` | evaluating and adding packages |
 | `guidance/fact-checking.md` | mandatory search-verification of external actionable claims (prices, eligibility rules, offers) before asserting |
 | `guidance/git-workflow.md` | branching, PRs, merge procedures, commit messages |
+| `guidance/goal-conditions.md` | /goal for headless runners: mission-file pattern, condition rules, BLOCKED escape hatch |
 | `guidance/learning-capture.md` | when and where to persist operational learnings |
 | `guidance/measurement-windows.md` | auditing a logger/collector's coverage, or a metric whose denominator comes from a different source than its numerator |
 | `guidance/operational-safety.md` | self-deploy loops, restart storms, hook loops |
@@ -35,6 +37,8 @@ Wire `--check` into CI so a new guidance file cannot land undiscoverable. A file
 | `guidance/repo-creation.md` | checklist for new repos: cross-cutting guidance incorporation, CLAUDE.md structure |
 | `guidance/resource-awareness.md` | server resource checks |
 | `guidance/secrets-hygiene.md` | secret rotation, history rewrite, detection patterns |
+| `guidance/service-hardening.md` | restricting a service to a VPN/private interface, auditing whether a port is actually exposed, hardening a host-installed service after its installer ran, or hardening a Docker/container service for long-running reliability |
+| `guidance/shell-portability.md` | writing or debugging a shell script that has to run on BOTH Linux/WSL hosts and a Mac |
 | `guidance/stop-hook-safety.md` | tiered stop hook classification, guard library, Tier 3 recursion prevention |
 | `guidance/testing.md` | writing and running tests, cross-layer invariants |
 | `guidance/when-to-fan-out.md` | when to spawn subagents (Task fan-out / parallel bash / Workflow) vs stay single-agent; concurrency-safe 3-phase pattern |

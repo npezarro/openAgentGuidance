@@ -66,6 +66,9 @@ wanted = {
     ],
     "PostToolUse": [
         cmd('bash "$AG/hooks/tool-loop-guardrail.sh"; exit 0'),
+        # Writes the ledgers claim-guard, worktree-guard and check-unpushed read.
+        # Without it those guards see no session's writes and never fire.
+        cmd('bash "$AG/hooks/track-repo-writes.sh"; exit 0'),
     ],
 }
 
