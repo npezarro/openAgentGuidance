@@ -7,7 +7,7 @@ Binding a service to a private interface is a claim about the whole host, not ab
 
 Installers (MSI, .deb postinst, setup scripts) often add a blanket allow rule for their own binary during installation. That rule is usually **scoped to the program, with no port, interface, profile, or remote-address restriction**.
 
-Host firewalls are **allow-wins**. One unrestricted allow rule for the binary makes every narrowly scoped rule you add afterward decorative. You can write a perfect interface-scoped ruleset and still not change who can reach the service.
+Allow rules **do not narrow each other**: traffic that matches *any* enabled allow rule is admitted, so one unrestricted allow rule for the binary makes every narrowly scoped allow rule you add afterward decorative. You can write a perfect interface-scoped ruleset and still not change who can reach the service. (An explicit *block* rule is different: on Windows Firewall and most host firewalls a matching block overrides a conflicting allow. Check your firewall's precedence rules before relying on either behavior.)
 
 **Before you add your own rules, list the rules the installer created**, then disable or remove them. Grep the installer's own scripts to find where the rules come from:
 

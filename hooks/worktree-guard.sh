@@ -67,7 +67,7 @@ TOUCH_WINDOW="${CLAIM_GUARD_TOUCH_WINDOW:-7200}"
 ACK="/tmp/claude-claim-ack-${SID}"
 LOG="$HOME/.claude/logs/claim-guard.log"
 
-LIB="$HOME/repos/openAgentGuidance/hooks/lib/write-target-inference.sh"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-target-inference.sh"
 [ -f "$LIB" ] || exit 0
 # shellcheck source=lib/write-target-inference.sh
 . "$LIB"

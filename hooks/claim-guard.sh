@@ -33,7 +33,7 @@ INPUT=$(cat)
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SID" ] && exit 0
 
-LIB="$HOME/repos/openAgentGuidance/hooks/lib/write-target-inference.sh"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-target-inference.sh"
 [ -f "$LIB" ] || exit 0
 # shellcheck source=lib/write-target-inference.sh
 . "$LIB"

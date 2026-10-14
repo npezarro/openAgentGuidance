@@ -23,6 +23,12 @@ INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
 
+# Per-session liveness marker. claim-guard and worktree-guard only treat another
+# session's ledger as a live competing writer while this file is fresh, so without
+# it neither guard ever fires. Install this hook without a matcher so every tool
+# call refreshes it, not only writes.
+touch "/tmp/claude-session-alive-${SESSION_ID}" 2>/dev/null || true
+
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-target-inference.sh"
 [ -f "$LIB" ] || exit 0
 # shellcheck source=lib/write-target-inference.sh
