@@ -1,5 +1,10 @@
 # progress.md
 
+## 2026-10-14: hand-port pass
+
+- `9de4b7d` publish `track-repo-writes.sh` + wire in install.sh; check-unpushed commit ledger; ESSENTIAL rules 4/6; agent.md security bullets; +4 guidance files (change-detection, shell-portability, goal-conditions, service-hardening)
+- `4f1a8a8` tracker refreshes the per-session liveness marker; guards load lib relative to script; firewall precedence corrected
+
 ## 2026-08-19: created and rebuilt
 
 - `3993a7e` init: repo skeleton (README, LICENSE, CI scan workflow)
