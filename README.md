@@ -14,7 +14,7 @@ It is a set of behavioural rules, on-demand guidance files, git and session hook
 | `guidance/INDEX.md` | Generated from the `Load when:` headers, so the agent knows what exists without reading it all. |
 | `hooks/` | Session and git hooks. These are the rules with teeth: a rule a hook can enforce should not rely on the model remembering it. |
 | `agents/` | Subagent definitions (reviewer, debugger, architect, security, verifier, and others). |
-| `templates/` | A `settings.json` wiring the hooks in, plus context, progress, commit and PR templates. |
+| `templates/` | Context, progress, commit-message and PR-body templates. Hooks are wired into `settings.json` by `scripts/install.sh`, not by a template. |
 | `scripts/install.sh` | Wires the whole thing into `~/.claude/settings.json` and installs the git hooks. |
 
 ## Setup

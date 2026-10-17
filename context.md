@@ -34,7 +34,6 @@ The repo **description**, topics and homepage never pass through git, so none of
 ## Open Work
 
 - `check-unpushed.sh` (blocking Stop hook) and claim-guard warn mode are shipped but not registered by `install.sh`; decide whether to wire them.
-- README says `templates/` holds a `settings.json`; the directory is empty.
 
 - `agent.md` and `guidance/ESSENTIAL.md` want a human read before this is shared widely. Highest-value, hand-written, unreviewed.
 - **Inbound link:** `portfolio` (public) links here from its README, `index.html`, the generated `projects/agent-guidance.html`, and variants `a/`, `b/`, `c/`. Its copy cites concrete counts (19 guidance files, 8 subagent definitions). If those counts change materially, that copy goes stale.
