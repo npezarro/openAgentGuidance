@@ -1,7 +1,7 @@
 <!-- Load when: research depth and methodology before producing guides or recommendations -->
 # Deep Research Before Recommendations
 
-When the user asks you to research a topic and produce a guide, recommendation, analysis, or buying decision, research thoroughly before you start writing. Surface-level research produces surface-level guides, and then the user has to do the real research themselves. That defeats the purpose.
+When the user asks you to research a topic and produce a guide, recommendation, analysis, or buying decision, do the research thoroughly before you start writing. Surface-level research produces surface-level guides, and then the user has to do the real research themselves, which defeats the purpose.
 
 ## When This Applies
 
@@ -11,24 +11,25 @@ Any task where you produce a deliverable based on external research:
 - Buying guides and price optimization
 - Technology evaluations and architecture decisions
 - Troubleshooting guides for unfamiliar tools
+- Travel, logistics, and itinerary planning
 - Any "research X and tell me what to do" request
 
-Does NOT apply to: tasks where you already have deep knowledge, pure code implementation, or tasks that use only local or repo context.
+Does NOT apply to tasks where you already have deep knowledge, pure code implementation, or tasks that use only local or repo context.
 
 ## Minimum Research Standard
 
 ### 1. Source Diversity (at least 3 of these categories)
 - **Official documentation**: the product's own docs, FAQ, setup guide
-- **Community forums**: Reddit threads, Stack Overflow, GitHub issues, Discord servers
+- **Community forums**: Reddit threads, Stack Overflow, GitHub issues, community chat servers
 - **Recent blog posts and tutorials**: published within the last 12 months
-- **Video content**: YouTube walkthroughs (check descriptions and comments for gotchas). **Read the transcript, not a third-party recap** (see below).
+- **Video content**: YouTube walkthroughs (check descriptions and comments for gotchas). **Read the transcript, not a third-party recap** (see 1b).
 - **Comparison and review sites**: when evaluating alternatives
 
-A guide built from 2-3 WebSearch results and their top links is not research. That's skimming.
+A guide built from 2-3 search results and their top links is not research. That's skimming.
 
 ### 1b. YouTube: pull the caption track, don't settle for a recap
 
-Third-party blog recaps of a talk lose detail and often get the emphasis wrong. If a video matters to the answer, read what was actually said. Whisper transcription is the right tool when you need word-level timing (for example, on your own videos). For someone else's talk, captions are much faster; hours of video come down in seconds:
+Third-party blog recaps of a talk are lossy and often get the emphasis wrong. If a video matters to the answer, read what was actually said. Speech-to-text (for example Whisper) is the right tool when you need word-level timing on your own videos. For **someone else's** talk, captions are far faster; hours of video take seconds:
 
 ```bash
 yt-dlp --skip-download --write-auto-subs --write-subs \
@@ -37,18 +38,18 @@ yt-dlp --skip-download --write-auto-subs --write-subs \
 
 Two post-processing steps are mandatory, or the output is unusable:
 
-1. **Dedupe.** Auto-caption VTT uses rolling display, so each cue repeats earlier lines and a naive strip gives you about 3x duplicated text. Strip the `<c>` karaoke tags, unescape HTML, drop any line that matches one of the last ~6 lines you emitted, then reflow into ~45s timestamped paragraphs so the chunks are readable and citable.
-2. **Correct proper nouns.** Auto-captions mangle names badly and *will* lead you to misquote: speaker names come out as different, plausible-sounding names, and product names turn into common words ("cloud"/"quad"/"claw" for Claude, "grap" for grep). Captions also drop plurals. Correct names in your prose, but **keep quotes exactly as captured** so they can still be checked with grep, and say so in the deliverable.
+1. **Dedupe.** Auto-caption VTT uses rolling display, so each cue repeats earlier lines and a naive strip gives you about 3x duplicated text. Strip `<c>` karaoke tags, unescape HTML, drop any line that matches one of the last ~6 emitted lines, then reflow into ~45s timestamped paragraphs so the chunks are readable and citable.
+2. **Correct proper nouns.** Auto-captions mangle names badly and *will* make you misquote. Expect speaker names to come out as phonetic near-misses, and product names to become common words (an AI product name rendered as "cloud", "quad", or "claw"; "grep" rendered as "grap"). Captions also drop plurals. Correct names in your prose, but **keep quotes exactly as captured** so they stay grep-verifiable, and say so in the deliverable.
 
-**Then count terms.** Term frequency on a transcript is cheap and catches things reading misses. Run `grep -oic` for the 5-10 terms central to your question. Counting two competing terms across several talks by the same speaker can show their real conceptual vocabulary. One term used dozens of times and its rival used zero times can flip a recommendation. A zero count is a finding, not missing data.
+**Then count terms.** Term frequency on a transcript is cheap and catches things reading misses. Run `grep -oic` for the 5-10 terms central to your question. Counting one concept word against its near-synonym across several talks by the same speaker can show their real conceptual vocabulary (dozens of uses of one, zero of the other) and invert a recommendation. A zero count is a finding, not missing data.
 
 **Verify delegated reads.** When subagents read long transcripts, require verbatim quotes with timestamps, then re-grep their key claims in the main thread before you publish. It's cheap insurance and makes every claim defensible.
 
 ### 2. Gotcha Hunting
-Before recommending any setup or product, search for problems on purpose:
+Before recommending any setup or product, search explicitly for problems:
 - Search "[product] problems [year]", "[product] not working", "[product] issues reddit"
 - Read at least one negative or critical thread to understand how it fails
-- Include known limitations and common pitfalls in your deliverable
+- Put known limitations and common pitfalls in your deliverable
 - If something looks too easy, it probably has a catch you haven't found yet
 
 ### 3. Cross-Referencing
@@ -59,9 +60,9 @@ Before recommending any setup or product, search for problems on purpose:
 
 ### 4. Version and Platform Disambiguation
 - Identify which version, OS, hardware, or configuration the advice applies to
-- Call out explicitly when different versions or platforms have different paths (e.g., two products sold under the same brand name can have completely different setup stories)
+- Say explicitly when different versions or platforms have different paths (two products sharing a brand name can have completely different setup stories)
 - Check whether the product has had recent major changes that make older guides wrong
-- Note the date of your sources; a guide written before a major product update may be wrong
+- Note the date of your sources. A guide written before a major product update may be wrong.
 
 ### 5. Completeness Audit
 Before writing, list the questions a reader would have:
@@ -71,180 +72,174 @@ Before writing, list the questions a reader would have:
 - What does "done" look like? (verification steps)
 - What are the ongoing costs or maintenance needs?
 
-If you can't answer one of these, you haven't researched enough. Go back and find the answer.
+If you can't answer one of these, you haven't researched enough. Go back and find it.
 
 ### 6. Recency Verification
 - Check that the URLs you recommend are still live
-- Verify that addon, plugin, and extension names and installation methods are current
+- Verify that addon, plugin, and extension names and install methods are current
 - Look for deprecation notices, service shutdowns, or major migrations
-- Prefer sources from the last 6 months; if you use older ones, verify the information still holds
+- Prefer sources from the last 6 months. If you use older sources, verify the information still holds.
 
 ## Research Workflow
 
 1. **Scoping search** (2-3 queries): understand the landscape and identify key concepts and decision points
-2. **Deep dive** (3-5 queries + fetches): read official docs, community threads, and recent tutorials in full
+2. **Deep dive** (3-5 queries plus fetches): read official docs, community threads, and recent tutorials in full
 3. **Gotcha search** (1-2 queries): look explicitly for problems, limitations, and common mistakes
 4. **Verification pass** (1-2 fetches): cross-check critical claims against primary sources
 5. **Completeness check**: review against the audit questions above and fill gaps with targeted searches
-6. **Write the deliverable**: only now
+6. **Re-check the user's own state** (see "Synthesis-Time Checks"): mailbox and calendar, if you have access
+7. **Write the deliverable**: only now
 
-If you start writing after step 2, you skipped half the process.
+If you're writing after step 2, you skipped half the process.
 
 ## Quality Signals
 
 A well-researched deliverable includes:
 - Prerequisites and decision trees ("if you have X, do this; if Y, do that")
 - Specific version numbers and dates for time-sensitive information
-- Known limitations stated upfront, not buried
-- A troubleshooting section with real common errors (not a generic "check your connection")
+- Known limitations stated up front, not buried
+- A troubleshooting section with real common errors (not generic "check your connection")
 - Links to primary sources the user can check for updates
+- A working, specific link for every recommended option (see "Links")
 
 ## Anti-Patterns
 
 - Writing a guide from the first 3 search results
 - Treating search snippets as verified facts without reading the full page
-- Skipping community forums (where real users report real problems)
+- Skipping community forums, which is where real users report real problems
 - Presenting one path when different situations call for different valid paths
 - Leaving out known limitations to make the recommendation sound cleaner
-- Not checking whether a free tool has gone paid, or the other way around
+- Not checking whether a free tool has gone paid, or the other way round
 - Recommending a specific version without checking that it's still current
-- **Giving up on a source at the first empty or blocked fetch.** Login walls, paywalls, and JS single-page apps can be worked around; they aren't dead ends. Escalate in order: plain fetch, then a headless page reader that renders JS, then feed or transcript tricks (RSS, caption tracks, AMP or print views), then an authenticated browser session, and only then fall back to search results. Auth-gated pages are exactly what the authenticated browser step is for.
-- **Spawning research subagents that can only do a plain fetch on auth-gated or SPA sources.** They hit the same wall and quietly "resolve" it by writing a confident summary from search snippets. Give subagents the full escalation path, or retrieve the page in the main thread and pass the text down. Always label anything that came from search results as secondhand.
+- **Giving up on a source after the first empty or blocked fetch.** Login walls, paywalls, and JS single-page apps can be worked around. Escalate through an access waterfall: plain fetch, then a headless page reader that renders JS, then feed or transcript tricks (RSS, caption tracks, API endpoints), then an authenticated browser agent using the user's session, then web search as a last resort. Auth-gated pages (professional networks, paid newsletters) are exactly what an authenticated browser is for.
+- **Spawning research subagents that only have a plain fetch tool for auth-gated or SPA sources.** They hit the same wall and quietly "resolve" it by writing a confident summary from search snippets. Give subagents the whole waterfall, or retrieve the page in the main thread and pass the text down. Always label anything you got from search as secondhand.
+
+## Reading Sources Faithfully
+
+### A successful fetch is not a faithful read: open the document when the answer is a specific limit
+Many fetch tools retrieve a page or PDF and then answer your prompt against it with a small, fast model. That summarizing step can fail **silently and confidently** on a document it retrieved correctly. A successful retrieval tells you nothing about whether the answer is right. In practice, a fetch summary of a vendor's own terms PDF has reported the wrong coverage cap and claimed that regional pricing tiers didn't exist, when the document printed them explicitly. Those were the headline findings of the research.
+
+**When two fetches of the same vendor's own material disagree, the likely explanation is a bad read, not an inconsistent vendor.** Don't average them, and don't pick the more plausible one.
+
+**Rule:** when the answer you need is a specific number, cap, limit, price, date, or eligibility threshold, and the source is authoritative (a vendor's own terms, policy PDF, spec, or contract), don't stop at the summary. Read the raw document yourself; if the fetch tool saves content to a local path, open that file directly (page-range reads work for PDFs). It costs one extra tool call. This is a harder case than a blocked fetch: you get a clean, plausible, wrong answer from a document that really was fetched, and nothing signals an error.
+
+### A lazy-loaded collection silently truncates to what's rendered, not what exists
+Infinite-scroll feeds, virtualized lists, and photo albums render items only as you scroll. A read can return a small, consistent subset with no "N of M" count and no error. If that early subset isn't representative (for example, mostly from one device, one period, or one category), conclusions drawn from it can be the exact opposite of what the full set shows, and so can any recommendation built on them.
+
+A plausible nonzero count mistaken for the whole set is more dangerous than an empty read, because there's nothing to catch.
+
+**How to apply:** before analyzing any scraped UI collection, compare the number of items you read against the UI's own stated total (an album count, a "showing X of Y" label, the source API's count). If there's no stated total, keep scrolling or paging until the count stops growing, and report how many loads it took.
+
+### Pre-test a gated source's access method before fanning out
+When a fan-out hits a login wall or SPA on first contact, each agent tends to report the source as "couldn't check" instead of anyone solving access once. Test each gated source's access method in the main thread first, then give agents the proven method, not just the URL. Confirm the test reached the **intended** page: a wrong code or ID can return a styled error page, or redirect to an unrelated listing that still looks like success. Add an adversarial verifier pass afterward. Availability of scarce resources (a room, an award seat, a ticket) can change within hours of the research pass.
+
+## Source Independence
+
+### A "best alternative to X" result can be the alternative's own SEO blog
+In small categories, vendors rank cheaply for their own comparison keywords because nobody else writes the roundup. The search tool hides the domain's relationship to the product, so vendor marketing looks like independent review. A top-ranked "the only option that does all three" claim can come from the product's own blog, about an app with a tiny install base and no ratings.
+
+**How to apply:** when a search result recommends a product, check whether the recommending domain **is** the product before you repeat the claim. Then check maturity on the primary listing (app store page, marketplace listing), not the blog: rating, review count, download tier, price, "Contains ads" or "In-app purchases" flags, and the last-updated date. Download and review counts are the fastest maturity filter. A category incumbent typically has 100K+ downloads; 1K+ with no rating is effectively pre-release. The same check catches incumbents that have since added ads and products that have been delisted entirely.
+
+### A vendor's page is not independent evidence
+Manufacturer blogs and retailer buying guides show up most easily on exactly the searches that ask why a rival product type fails. Check who publishes a page (who owns the site, its own about or products page) before you rely on it to rule out a whole category. Corroborate independently or label the claim vendor-sourced.
+
+### Verify that a company's flagship product is still on the market
+Job postings, company marketing sites, and investor pages are marketing copy and can be months out of date about the company's own product. A posting can lead with a flagship product that the product's own domain says was withdrawn from external users months earlier.
+
+**How to apply:** when researching a company for a role, an investment, or a partnership, fetch the **product's** own domain (and its status, pricing, and login pages), not just the company site and the job posting, and compare all three. A withdrawn product, a dead pricing page, or a login wall where a signup used to be changes what the job or deal actually is.
+
+**Corollary:** aggregator mirrors of postings drift from the canonical page. Treat the employer's applicant tracking system page as canonical and note conflicts (salary bands, titles) instead of averaging them. Scraped company stats (headcount, revenue) from data aggregators can be wildly off from the company's own profile; flag them as unverified.
 
 ## Company-Specific Deliverables: No Invented Product Claims
 
-When building materials ABOUT a specific product or company (interview memos, prototype decks, product analyses, competitive write-ups), include only product capabilities that are:
+When you build materials ABOUT a specific product or company (interview memos, prototype decks, product analyses, competitive write-ups), include only product capabilities that are:
 
-1. **Verified through public sources**: official docs, press releases, tech blog posts, shareholder letters, or news articles. Date-stamp and link the source.
+1. **Verified through public sources**: official docs, press releases, engineering blog posts, shareholder letters, or news articles. Date-stamp and link the source.
 2. **Confirmed in the user's own sketch or brief**: if the user described the feature, use their framing exactly.
 
 Do NOT extrapolate, assume, or invent features that "seem like they should exist" or "fit the product vision."
 
-**Why this matters:** to a hiring panel, client, or stakeholder, a made-up feature reads as an authoritative claim. When someone challenges it, it's harder to recover from than a gap in your knowledge. Invented features, targets, and product combinations in one prep deck can force a full ground-up rebuild.
+**Why this matters:** to a hiring panel, client, or stakeholder, an invented feature reads as an authoritative claim. When someone challenges it, the error is harder to recover from than a gap in knowledge, and invented features, targets, or programs can force a ground-up rebuild of the whole deliverable.
 
-**Self-check before submitting any company-specific deliverable:** for each product claim, ask "where is the public source for this?" If you can't point to one, mark it as assumed or cut it. Treat the user's own words as the floor for what's in scope.
+**Self-check before submitting any company-specific deliverable:** for each product claim, ask "where is the public source for this?" If you can't point to one, mark it as assumed or cut it. The user's own words set the minimum scope.
 
-## Verification Lessons
-
-### Check that a job posting's flagship product is still on the market
-A live job posting is marketing copy, and it can be months out of date about the company's own product. A posting can lead with a flagship product while the company site still shows a "Try it" button, even though the product's own domain says it was withdrawn from external users months earlier. That turns an apparent product role into something else entirely (for example, client delivery at a services firm), which is a different fit decision.
-
-How to apply: when researching a company for a role, an investment, or a partnership, fetch the PRODUCT's own domain (and its status, pricing, or login page), not just the company marketing site and the job posting. Compare all three. A withdrawn product, a dead pricing page, or a login wall where a signup used to be changes what the job actually is.
-
-Corollary: aggregator copies of postings drift from the original applicant tracking system (ATS) page, and salary figures can differ by tens of thousands. Treat the ATS page (Ashby, Greenhouse, Lever) as the source of truth and note the conflict rather than averaging it. The same goes for scraped company stats: a data aggregator can report headcount and revenue an order of magnitude off from the company's own profile.
+## Pricing and Product Lifecycle
 
 ### Price tiers can be non-monotonic: a shorter booking can cost more
-Rental and subscription pricing is tiered, not linear, and a tier boundary can make a SHORTER booking cost MORE than a longer one. Never assume price rises steadily with duration, and never quote just the duration the user happened to mention without checking both sides of the tier boundary.
+Rental and subscription pricing is tiered, not linear, and a tier boundary can make a SHORTER booking cost MORE than a longer one. On a live rental booking engine, a 27-day rental priced in the weekly tier cost over $100 more than a 28-day rental priced in the monthly tier, and days 29-30 added well under $1 per day. The vendor's own published copy put the monthly threshold one day off from where the engine actually applied it. Vendor documentation about its own pricing tiers is a hypothesis, not a fact.
 
-Observed on a live rental booking engine: a 27-day booking priced on the weekly tier cost about $129 more than a 28-day booking on the monthly tier, and days 29-30 added less than $1 total. The vendor's own long-term page put the monthly threshold at a different day count than the engine actually used. Vendor documentation about its own pricing tiers is a hypothesis, not a fact.
+**Rule:** for any duration-tiered price (car rental, subscription, storage, cloud commitment), bracket the boundary by quoting N-1, N, and N+2, not just the N the user mentioned. Report the cliff explicitly. "Book one day longer and save $100+" is often the single most actionable finding of the whole research pass.
 
-Rule: when researching any price tiered by duration (car rental, subscription, storage, cloud commitment), check both sides of the boundary by quoting N-1, N, and N+2 rather than only the requested N. Report the cliff explicitly, because "book one day longer and save money" is often the single most useful finding in the whole research pass.
+### A higher model number can be a regional compliance variant, not a newer generation
+A model number one higher than the product you're pricing can be a regional-compliance SKU (same hardware with a feature disabled to meet local regulations), while the real successor launched under a completely different naming scheme.
 
-### A successful WebFetch is not a faithful read: open the document when the answer is a specific limit
-WebFetch retrieves a page or PDF, then answers your prompt about it using a small fast model. That summary step can fail SILENTLY and CONFIDENTLY on a document it retrieved correctly. A successful retrieval tells you nothing about whether the answer is right.
+**Why:** to judge whether a discount is good, you need to know where the product is in its lifecycle. Reasoning from model numbers alone gets both halves wrong: it invents an upgrade that is really a regional downgrade, and it misses the real generational break that should make the old model's discounts deepen over time.
 
-Observed: a summary of a vendor's own coverage terms PDF reported the wrong coverage cap (off by more than a week) and claimed the document had no region-specific pricing, when it printed two explicit regional price tiers. Both were the headline findings of the research.
-
-WHAT CAUGHT IT: the same vendor's FAQ, fetched minutes earlier, gave the correct cap. **When two fetches of the same vendor's own material disagree, the likely explanation is a bad read, not an inconsistent vendor.** Don't average them or pick the more plausible one.
-
-THE RULE: when the answer you need is a specific number, cap, limit, price, date, or eligibility threshold, and the source is authoritative (a vendor's own terms, policy PDF, spec, or contract), don't stop at the WebFetch summary. WebFetch saves binary content to a local path; Read it directly (the `pages` parameter handles PDFs). It costs one extra tool call.
-
-This differs from the anti-patterns above, which cover fetches FAILING on blocked pages and subagents passing off search snippets as research. This is the harder case: a clean, plausible, wrong answer from a document that was really fetched. There's no error signal to notice.
-
-### A "best alternative to X" search result can be the alternative's own SEO blog
-In small product categories, the top results for "best alternative to X" are often blogs run by competing products, each naming itself the winner. The search summary presents that as a neutral finding. The live app store listing can then show an app with about 1K downloads and no rating: too immature to trust with sensitive permissions, yet presented as the top pick.
-
-**Why:** in small categories, vendors can rank for their own comparison keywords cheaply, because nobody else writes the roundup. The search tool hides the link between the domain and the product, so vendor marketing looks like an independent review.
-
-**How to apply:** when a search result recommends a product, check whether the recommending domain IS the product before repeating the claim. Then verify the install base on the primary listing (the app store or marketplace page), not the blog. Pull the rating, review count, download tier, price, "Contains ads" and "In-app purchases" flags, and the last-updated date. Download and review counts are the fastest maturity filter: a category leader has 100K+ downloads, while 1K+ with no rating is pre-release. The same check catches established products that have recently added ads or been delisted entirely.
-
-### Stating a finding is not acting on it; verify dismissals; a vendor's page is not independent evidence
-A buying guide recommended anonymous marketplace sellers in a category that has established brands. Rules meant to prevent this already existed, and all of them fired without effect. Three general lessons apply to any research agent:
-
-1. **If a check's required output is a sentence, a sentence will satisfy it.** The rule said "if the field is all white-label, say so plainly, then go find the differentiated options." The guide said so plainly, then recommended a white-label unit anyway. Describing the problem is the cheap half of the instruction, so it's the half that gets done. When you write a rule, attach a consequence the sentence alone doesn't satisfy, and say explicitly that writing the sentence obliges the rest.
-
-2. **No coverage in a channel is evidence about the channel, not the subject.** If you sweep design and gear press for a mundane hardware item that nobody covers there, the empty result isn't evidence that the category is a commodity. Send the search to the channel that actually covers the subject before you conclude anything from silence.
-
-3. **A dismissal needs the same verification as a recommendation.** Writing "only sold commercially", "discontinued", or "not available to consumers" removes an option from the reader's choices, so it needs the same source check as a price. Never generalize from the most expensive SKU on a page that lists several tiers.
-
-Related: **a source that sells a competing product is not independent evidence.** Manufacturer blogs and retailer buying guides show up most easily on exactly the searches that ask why a rival product type fails. Check the publisher (who owns the site, its own about or products page) before you rely on a page to rule out a whole category. Corroborate it independently or label the claim as vendor-sourced.
-
-Testing note for rules written into prompt text: check that the rule is PLACED inside the template that actually reaches the model, not just that it exists somewhere in the file. A rule that drifts into a comment has stopped running, and grep can't tell the difference. Verify by mutation: break the rule and confirm a test fails.
-
-### Match a scraped asset to an existing library by name, and refuse the ambiguous ones
-If you re-import scraped assets into the site they came from, you duplicate the owner's own files under names the scrape invented (such as a content-hash prefix), and the names won't match the images.
-
-Match against the existing library by file name. Strip the scrape's prefix and any suffix the platform added (WordPress, for example, serves a `-scaled` copy of an oversized upload, so the scraped name is never the stored name). Try exact candidates first, then one normalized key.
-
-Refuse the normalized pass whenever it's ambiguous ON EITHER SIDE: two library files that reduce to one key, or two scraped paths that reduce to one key. A wrong match puts the wrong picture on the wrong item, which is worse than an extra file, so give up and download instead. Also strip platform-reserved suffixes (such as `-scaled`) from anything you store, or every file lands as `foo-scaled-1`.
-
-Before running the import, prove it works against a test library set up to look like the real one. Assert that the total attachment count equals the image count (no duplicates), and that a second run changes nothing.
-
-### A wide search that prints a narrow table is a narrow answer: measure the output funnel, not the search
-A user reported that a research guide covered too narrow a range of options. The obvious diagnosis (it didn't search widely enough) was wrong, and the stored tool trace disproved it in one query: the run made over a hundred web searches touching about 30 brands, then printed a 12-row candidate table in which most of the researched brands appeared nowhere, not even as rejected rows. Most rows were one form factor, and half came from two brands. The research was wide; the OUTPUT funnel was narrow. Searching harder would have spent budget on the half that already worked.
-
-Rules:
-
-1. When a report reads as narrow, compare what was researched against what was PRINTED before you touch the search step. The two failures need opposite fixes, and only the trace tells them apart. If you keep no trace of tool calls, you can't tell them apart afterward, and you'll default to the wrong fix, because "search harder" is the obvious lever.
-
-2. An option that was researched and silently dropped looks, to the reader, exactly like an option that was never considered. So a candidate table must include the losers with their reasons, not just the finalists. Diagnostic: if every rejected row is a near-duplicate of something shortlisted, the table is showing runners-up, not the field.
-
-3. Check concentration in the output, not just whether items are identical. A field that is all one form factor, or dominated by one or two brands, means the answer was ranked within the first slice of options the sources offered and inherited that channel's house style. A sameness check asks whether items are identical; it never asks whether the set covers the range of options, so that needs its own explicit check.
-
-4. When the user relaxes a constraint ("it doesn't have to be X", "any style", "open to alternatives"), that's an instruction to RE-OPEN the field. Re-running the original query with one word deleted returns the same channel's answer in the same house style, which is exactly what the user is complaining about.
-
-5. A prompt rule that lives in a constant but is never inserted into a given code path reaches nobody, and grep can't tell that apart from a working rule. Test the ASSEMBLED prompt by running the real code path (with a fake model that echoes back what it received), not by reading the source text. Watch especially for fallback branches that drop instructions when a prompt file fails to load.
-
-6. Watch for a whole conversational MODE that silently skips the quality controls. If follow-up answers bypass the editor pass and receive no research instructions, every editorial check you add to the main path does nothing on them. A control added to the main path hasn't been added to the product; list every mode and check each one.
-
-### A multi-channel category needs the answer counted by link DOMAIN, not by candidate row
-A used-vehicle guide was reported as "only constrained to one site". Counting the stored guide showed about half its links went to one aggregator, and every listing link was that aggregator's FILTERED SEARCH PAGE rather than a specific vehicle. The prose evidence cited 25 domains, so every existing breadth check passed: the candidate table had 14 rows across 5 types, and the research cited recalls, technical details, taxes, and incentives from independent sources. What was single-source was the INVENTORY.
-
-Rules:
-1. Where the same item is sold through competing channels (used and secondary-market goods, cars, refurbished electronics, appliances, tickets), the channel is part of the recommendation: price differs, and so do fees, return window, warranty, and recourse. A reader handed one channel can't tell whether it's the cheap one.
-2. Count the links you're about to print BY DOMAIN. Breadth checks that count candidate rows by type and by brand miss this, because they measure the wrong axis. If one domain holds most of the links, the guide fails, even when the research was wide.
-3. A filtered search-results URL is not a purchase link. Tomorrow it shows a different item, price, and seller, and it hands back the selection work the guide was supposed to do.
-4. The channel the first search surfaces is the one that spends the most on SEO, not the one with the best price, and every later search inherits it. Fix this with one search PER CHANNEL TYPE (aggregators, fixed-price national retailers, manufacturer or certified programs, specialist dealers, private sellers) plus the category's independent valuation source, not with more searches of the same kind.
-5. When a user asks you to "find more sources", they're complaining about channels, not search volume. Answering with more cited articles doesn't address it.
+**How to apply:** when assessing the price of a numbered product, search for the successor by generation and launch date, not by incrementing the number. Confirm what each adjacent model number actually is (regional SKU, colorway, capacity tier) before treating one as newer.
 
 ### Purchase-timing advice needs a check for statutory effective dates, not just price trends
-A purchase recommendation built only on market direction (year-over-year and month-over-month price changes) can be overturned by a dated change in the law. In one case, a signed consumer-protection statute with a future effective date was about to give buyers a statutory right to cancel that didn't exist before that date. Waiting a few weeks turned an irreversible purchase into a cheap option to return, which was worth more than any discount reachable by negotiating.
+A "be patient on price" recommendation built on market direction can be outranked by a signed law that takes effect in a few weeks. For example, a consumer-protection statute might create a right to cancel that doesn't exist today. Waiting until the operative date can turn an irreversible purchase into one you can return, which is worth more than any discount you could negotiate.
 
-Rules:
-1. When advising WHEN to buy, sell, apply, or file, search for pending statutory or policy changes with an effective date, not just price and market trends. "Should I wait?" is a legal question as often as an economic one, and the legal answer is usually a hard date rather than a probability.
-2. A signed bill with a future effective date doesn't show up in any price source. Check the legislature's own bill status page for bills that are signed but not yet in effect in the relevant jurisdiction.
-3. State which parties the change does and doesn't affect. A new statutory minimum changes sellers who currently offer less, and changes nothing for retailers whose own policy already exceeds it. A blanket "wait for the new law" can be wrong for some channels.
-4. Verify a dated legal claim against the primary source before it drives a recommendation. A vetoed bill can circulate as if it were law: a cap widely quoted from a bill that passed both houses and was then vetoed is not the cap in force.
+**Rules:**
+1. When advising WHEN to buy, sell, apply, or file, search for pending statutory or policy changes with an effective date, not only price and market trends. "Should I wait?" is a legal question as often as an economic one, and the legal answer is usually a hard date, not a probability.
+2. A signed bill with a future operative date is invisible to every price source. Check the legislature's own bill status page for law that has been chaptered but isn't yet operative in the relevant jurisdiction.
+3. State which parties the change affects and which it doesn't. Sellers whose own policy already exceeds the new statutory floor are unaffected, so a blanket "wait for the new law" can be wrong for some channels.
+4. Verify a dated legal claim against the primary source before it drives a recommendation. Vetoed bills circulate as if they were law, and a widely quoted figure (a fee cap, a threshold) can come from a bill that passed both houses and was then vetoed.
 
-### Re-check the mailbox at synthesis time: the user can book the thing you're researching mid-run
-A long research run can be invalidated by the user acting while it runs. A run that recommends booking a rental car is obsolete on arrival if the user's own rental confirmation landed before the research finished; the real action becomes changing the existing reservation, not booking a second car.
+## Breadth of the Answer, Not Just the Search
 
-Why: research reads the world as of its START, while the user may be acting on the same problem at the same time, and confirmation emails are the cheapest signal that they did. The failure is silent, because the report reads as authoritative and internally consistent.
+### Stating a finding is not acting on it
+A check whose required output is a sentence will be satisfied by a sentence. A rule like "if the field is all white-label, say so plainly, then find the differentiated options" gets the cheap half done: the guide says so plainly, then recommends a white-label unit anyway. When you write a rule, attach a consequence the sentence alone doesn't satisfy, and say explicitly that writing the sentence obliges the rest.
 
-How to apply: before writing the synthesis of any multi-step booking or logistics run, re-run the mailbox search for confirmations dated AFTER the run began, not just before. One query catches the whole class of error where a recommendation contradicts something already purchased. This applies to flights, hotels, cars, tickets, and reservations.
+### Absence of coverage in a channel is evidence about the channel, not the subject
+If you sweep design and gear press for a mundane hardware category, nobody has written about it, and the silence gets misread as "this category is a commodity." Route the search to the channel that actually covers the subject (trade suppliers, specialist retailers, professional forums) before you conclude anything from silence.
 
-Corollary: a booking forwarded by a third party often carries no dates. Don't keep searching for a confirmation the user was never sent; say it can't be recovered from this account and name who holds it.
+### A dismissal needs the same verification as a recommendation
+Writing "only sold commercially", "discontinued", or "not available to consumers" removes an option from the reader's choices, so it needs the same source check as a price. Such dismissals are often contradicted by the very page being cited. Never generalize from the most expensive SKU on a page that lists several tiers.
 
-### Sweep the calendar, not just the mailbox, before synthesizing a plan: commitments constrain harder than purchases
-A trip plan with several candidate travel days can be broken by calendar entries the research never checked: a dinner in the destination city that rules out one option entirely, a midday task that decides which morning flight works, or commitments set in a different city on a day the plan puts the user somewhere else.
+### A wide search that prints a narrow table is a narrow answer
+When a report reads as narrow, the intuitive diagnosis ("it didn't search widely enough") is often wrong. A run can make 100+ searches touching ~30 brands and then print a 12-row table in which most of the researched brands appear nowhere, not even as rejected rows. The research was wide; the OUTPUT was narrow. Searching harder spends budget improving the half that already worked.
 
-Why: the mailbox shows what was PURCHASED; the calendar shows what was COMMITTED TO. Commitments constrain a plan harder than purchases, because a purchase can usually be changed for a fee while a commitment involves another person. Both sources can change during a long run.
+**Rules:**
+1. When a report reads as narrow, measure the ratio of what was researched to what was PRINTED before you touch the search step. The two failures need opposite fixes, and only a trace of tool calls tells them apart. Without a trace you'll default to "search harder", because that's the lever within reach.
+2. An option that was researched and silently dropped looks exactly like one that was never considered. A candidate table must include the losers with their reasons, not just the finalists. Diagnostic: if every rejected row is a near-duplicate of something on the shortlist, the table shows runners-up, not the field.
+3. Check concentration in the output, not just whether the items are identical. If the field is all one form factor or dominated by one or two brands, the answer was ranked inside the first slice of the solution space the sources offered and inherited that channel's house style. A homogeneity test asks whether the items are identical, never whether the set covers the space, so this needs its own explicit check.
+4. Relaxing a constraint ("it doesn't have to be X", "any style", "open to alternatives") is an instruction to RE-OPEN the field. Re-running the original query with one word deleted returns the same channel's answer in the same house style, which is exactly what the user is complaining about.
 
-How to apply: before writing the synthesis of any plan that schedules the user's days, sweep BOTH the mailbox and the calendar across the whole planned window, not just the days currently in play. Look specifically for (a) items created since the research began, and (b) items whose LOCATION contradicts where the plan puts the user. Also check the calendar before declaring a date unrecoverable from the mailbox, since it's the other place a date could be recorded.
+### A multi-channel category needs links counted by DOMAIN, not by candidate row
+A guide can pass every breadth check (many candidate rows across several types, prose citing two dozen domains) and still be single-source where it matters: about half its links can point to one aggregator, and every listing link can be a filtered search page instead of a specific unit.
 
-### A "things to do in <city>" ask is an itinerary problem: resolve it against the calendar's real free windows before listing anything
-A generic list of city suggestions is almost always wrong for the person asking, because their day is already half-committed. Pull the calendar and booking confirmations first and work out the actual free blocks, then filter candidates by those blocks AND by day-of-week closures (many good restaurants, and nearly every gallery, close on one specific weekday). A generic list silently violates two constraints. First, an international departure through US customs preclearance at the departure airport needs about 3 hours at the airport, which can wipe out the final evening entirely. Second, a venue open six days a week can be closed on exactly the day the traveler is free. State the deleted options out loud ("X is open only on Wednesdays, and Wednesday evening is your flight") rather than silently leaving them out.
+**Rules:**
+1. Where the same unit trades through competing channels (used and secondary-market goods, cars, refurbished electronics, appliances, tickets), the channel is part of the recommendation. Price differs, and so do fees, return window, warranty, and recourse. A reader given one channel can't tell whether it's the cheap one.
+2. Count the links you're about to print BY DOMAIN. Breadth checks that count candidate rows by type and brand have the same defect one axis over and don't catch this. If one domain holds most of the links, the guide fails, even if the research was wide.
+3. A filtered search-results URL is not a purchase link. Tomorrow it shows a different unit, price, and seller, and it hands back the selection work the guide was supposed to do.
+4. The channel your first search surfaced is the one that spends the most on SEO, not the one with the best price, and every later search inherits it. Fix this with one search PER CHANNEL FAMILY (aggregators, fixed-price national retailers, manufacturer or certified programs, specialist dealers, private party) plus the category's independent valuation source, not with more searches of the same kind.
+5. When a user says "find more sources", they're complaining about channels, not search volume. More cited articles don't fix it.
 
-### A higher model number can be a regional compliance variant, not a newer generation; find the real successor before pricing an "old" model
-A product with the next model number up can be a regional compliance variant of the same hardware with features disabled, while the actual successor launched under a different naming scheme entirely.
+## Synthesis-Time Checks (when you have access to the user's mailbox and calendar)
 
-**Why:** judging whether a discount is good requires knowing where the product is in its lifecycle. Reasoning from the model number alone gets both halves wrong: it invents an upgrade that is really a regional downgrade, and it misses the real generational break that should make discounts on the old model deepen over time.
+### Re-check the mailbox at synthesis time: the user may book the thing mid-run
+Research reads the world as of its START, while the user may be acting on the same problem at the same time. If a rental confirmation arrives during the run, a recommendation to "book a rental" is obsolete on arrival; the real action is to change the existing reservation. The failure is silent because the report reads as authoritative and internally consistent.
 
-**How to apply:** when assessing the price of a numbered product, search for its successor by generation and launch date, not by incrementing the number. Confirm what each neighboring model number actually is (regional SKU, colorway, capacity tier) before treating one as newer.
+**How to apply:** before writing the synthesis of any multi-step booking or logistics run, re-run the mailbox search for confirmations dated AFTER the run began, not just before. One query catches recommendations that contradict something already purchased. This applies to flights, hotels, cars, tickets, and reservations.
 
-### A lazy-loaded gallery silently truncates to what's rendered, not what exists
-Reading a photo album for metadata-based analysis can return only the first few dozen items of a much larger set. The grid renders thumbnails only as you scroll, and the read gives no "N of M" count or error to signal that the set is partial. A small early sample can be dominated by one subset (for example, one camera body) while the full set is dominated by another, which reverses both the analysis and any recommendation built on it.
+**Corollary:** a booking forwarded by a third party often carries no dates. Don't keep searching for a confirmation the user was never sent; say it can't be recovered from this account and name who holds it.
 
-**Why:** a subset that raises no error and looks internally consistent is the most dangerous failure here. There's no exception to catch, and a small early sample can look plausible while being systematically unrepresentative. This is the opposite of an EMPTY read mistaken for complete; here a NONZERO, plausible count is mistaken for complete.
+### Sweep the calendar too: commitments constrain harder than purchases
+The mailbox shows what was PURCHASED; the calendar shows what was COMMITTED TO. A purchase can usually be changed for a fee, but a commitment involves another person. A calendar sweep at synthesis time can show that one candidate travel day is impossible (a dinner in another city), that a midday task decides which flight works, or that commitments put the user in a different city than the plan assumes.
 
-**How to apply:** before analyzing any scraped UI collection (photo album, infinite-scroll feed, virtualized list), compare the item count you read against the UI's own stated total (an album count, a "showing X of Y" label, the source API's count) before drawing conclusions. If there's no stated total, scroll or page until the count stops growing, and say how many loads it took.
+**How to apply:** before writing the synthesis of any plan that allocates the user's days, sweep BOTH the mailbox and the calendar across the whole planned window, not just the days currently in play. Look for (a) items created since the research began, and (b) items whose LOCATION contradicts where the plan puts the user. Also check the calendar before you declare a date unrecoverable from the mailbox, since it's the other place a date might be recorded.
+
+### A "things to do in <city>" request is an itinerary problem
+A generic city-suggestions list is almost always wrong for the person asking, because their day is already half-committed. Pull the calendar and booking confirmations first, work out the actual free blocks, then filter candidates by those blocks AND by day-of-week closures (many good restaurants, and nearly every gallery, close on one particular weekday). Watch for constraints a generic list silently violates: an international departure with US border preclearance needs about 3 hours at the airport, which can wipe out the final evening, and a venue open six days a week can be closed on exactly the day the traveller is free. Name the options you removed ("X is Wednesday-only and Wednesday evening is your flight") instead of silently leaving them out.
+
+## Links
+
+### Every recommended option needs a booking or click-through link
+A recommended option without a link makes the reader research it again. For every recommended option (flights, hotels, award search, restaurants, activities, rentals), give the most specific working link: a deep link with dates, route, and guests prefilled is better than a generic homepage. For points redemptions, link both the award search and the transfer-partner page. Put each link inline next to its option, not in a list at the end. If a deep link isn't possible, link the closest search page and say what to enter. Verify that every link resolves.
+
+## Testing Prompt-Text Rules (when research behavior is driven by a prompt you maintain)
+
+- Check that a rule is PLACED inside the template that actually reaches the model, not just that it exists in the file. A rule that has drifted into a comment has stopped running, and grep can't tell the difference. Verify by mutation: break the rule and confirm a test fails.
+- A rule that lives in a constant but is never spliced into a given code path reaches nobody. Test the ASSEMBLED prompt by driving the real code path (for example, a fake model that echoes back what it received), not the source text. Check fallback branches especially: a branch that runs when a prompt file fails to load can drop the instructions entirely while its sibling branches keep them.
+- Watch for whole conversational MODES that silently skip the quality controls. If follow-up answers bypass the editor pass and the research instructions, every editorial check you add to the main path does nothing for them. A control added to the main path hasn't been added to the product until you've listed the modes and checked each one.

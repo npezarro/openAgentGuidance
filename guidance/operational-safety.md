@@ -5,43 +5,43 @@ Prevent feedback loops, restart storms, and cascading failures in automated syst
 
 ## Hook Loop Prevention
 
-Auto-posting hooks (blog, chat, notification) run on every Claude turn. If a hook failure triggers a retry or a new Claude session, you get an infinite loop.
+Hooks that post automatically (to a blog, a chat channel, or your notification channel) run on every Claude turn. If a failed hook triggers a retry or starts a new Claude session, you get an infinite loop.
 
 **Rules:**
 - Hooks must be fire-and-forget. Never retry on failure.
-- Hooks must not spawn new Claude sessions without recursion guards.
+- Hooks must not spawn new Claude sessions unless they have recursion guards.
 - Hooks must have timeouts (10s max). A hung webhook should not block the session.
 - If a hook fails, log the failure and continue. Do not abort the parent session.
 
-### Stop Hook Safety
+### Stop Hook Safety Framework
 
-Sort Stop hooks into three tiers:
-- **Tier 1, observation:** logs, metrics, notifications. No Claude calls.
-- **Tier 2, verification:** checks that read state and report. No Claude calls.
-- **Tier 3, Claude-invoking:** anything that runs `claude -p` or starts a session. These need all three guards below.
+Sort every Stop hook into one of three tiers:
+- **Tier 1, observation:** logs or posts something and never invokes Claude. Fire-and-forget with a timeout is enough.
+- **Tier 2, verification:** runs checks such as tests or linters, and still never invokes Claude.
+- **Tier 3, Claude-invoking:** calls `claude -p` or starts a session in some other way. These hooks are the dangerous ones.
 
-Every Tier 3 hook must source one shared guard library rather than carrying its own copy. The library provides:
-1. **Env var circuit breaker:** the hook sets a variable (for example `IN_STOP_HOOK=1`) before calling Claude and exits immediately if it is already set.
-2. **PID lockfile:** only one instance runs at a time.
-3. **Per-hour rate limiter:** a hard cap on invocations per hour.
+Every Tier 3 hook must source a shared guard library rather than carrying its own inline copy of the guards. The library should provide:
+- **Env var circuit breaker:** the hook sets a marker variable such as `IN_STOP_HOOK=1` before it invokes Claude, and exits right away if that marker is already set.
+- **PID lockfile:** only one instance of the hook can run at a time.
+- **Per-hour rate limiter:** a hard cap on invocations per hour, so a guard that fails still has a ceiling.
 
-**Lesson:** a Stop hook that ran a session scorer (`claude -p` with a small model) on every session exit re-triggered itself, because the scorer's own session exit fired the same hook. It spawned thousands of recursive sessions in one day and consumed most of a week's token budget before anyone noticed. A Stop hook that invokes Claude without a recursion guard is a loop by construction.
+**Lesson:** one Stop hook ran a session scorer (`claude -p` with a small model) every time a session exited. When the scorer's own session exited, it re-triggered the hook. That produced thousands of recursive sessions in a day and used most of a week's token budget. The fix was an env var guard plus a content pattern match, and those guards were then standardised in the shared library.
 
 ## Concurrent Sessions in One Checkout
 
-Two sessions working in the same checkout will overwrite each other's edits, switch branches under each other, and revert each other's work.
-- **Shared working tree:** give every session its own git worktree. Never run two sessions in one checkout.
-- **Singleton resources** (a deploy, a migration, a cron-owned file): use a real lock (`flock` or a lockfile with PID check), not a convention.
-- **When something keeps reverting:** check for another live session in the same tree first, before debugging your own code.
+If several agent sessions share one working tree, they overwrite each other's edits, branch switches and stashes.
+- **Use one worktree per session** (`git worktree add ../<repo>-<task> -b claude/<task>`). Never run two sessions against the same checkout.
+- **Use real locks for singletons.** Anything that must run once at a time (a deploy, a migration, a sync job) needs an actual lock, for example `flock`. A convention like "check whether someone else is doing it" is not a lock.
+- **Diagnostic order when changes keep reverting:** first look for another session or process writing to the same tree, then check for a generator or sync job that regenerates the file, and only after that suspect your own edit.
 
 ## Job Recovery Safety
 
 When a service recovers persisted jobs on startup:
 - **PID alive:** Re-attach and monitor for completion. Do not re-execute.
-- **PID dead:** Extract partial output, mark as failed, notify the user. Do not re-run automatically.
+- **PID dead:** Extract partial output, mark the job as failed, and notify the user. Do not re-run it automatically.
 - **Multi-turn job partially complete:** Re-queue from the last completed turn, not from scratch.
 
-**Never** automatically re-execute a failed job. The failure may have been caused by the job itself (e.g., it deployed the service that runs it). Automatic re-execution would repeat the failure.
+**Never** automatically re-execute a failed job. The job itself may have caused the failure (for example, it deployed the service that was running it). Automatic re-execution would repeat the failure.
 
 ## Postmortem Template
 
@@ -63,65 +63,67 @@ Add the entry to the project's `context.md` under a "Known Issues" or "Incident 
 
 When bulk-deleting content on external platforms (video hosts, social media, cloud storage), apply strict safeguards:
 
-1. **Gather and confirm first:** Build the full list of items to be removed and present it to the user for confirmation before deleting anything. This catches mistakes in date ranges, filters, or account selection.
-2. **Restrict to safe content types:** Only auto-generated or temporary content is eligible for bulk deletion (e.g., unlisted short clips, draft posts). Never bulk-delete public, private, or manually curated content.
-3. **Filter by metadata:** Apply duration, privacy status, date range, and ownership filters to exclude anything that shouldn't be touched (e.g., skip full-length videos when deleting shorts by filtering <=90s).
+1. **Gather and confirm first:** Build the full list of items to be removed and show it to the user for confirmation before deleting anything. This catches mistakes in date ranges, filters, or account selection.
+2. **Restrict to safe content types:** Only auto-generated or temporary content is eligible for bulk deletion (for example, unlisted short clips or draft posts). Never bulk-delete public, private, or manually curated content.
+3. **Filter by metadata:** Use duration, privacy status, date range, and ownership filters to exclude anything that shouldn't be touched. For example, when deleting short clips, filter to <=90s so full-length videos are skipped.
 
-**Why:** Platform deletions are irreversible. A wrong date range or missing filter can wipe out manually curated content. The confirmation step and content-type restriction ensure only disposable items are at risk.
+**Why:** Platform deletions are irreversible. A wrong date range or a missing filter can wipe out manually curated content. The confirmation step and the content-type restriction mean only disposable items are at risk.
 
 ## Verify Before Asserting
 
-Don't claim the user did something (submitted an application, sent an email, published a post) unless you can verify it through an authoritative source. The existence of prep materials, drafts, or related files does NOT confirm the action was completed.
+Don't claim the user did something (submitted an application, sent an email, published a post) unless an authoritative source confirms it. Prep materials, drafts, or related files do NOT show that the action was completed.
 
-**Why:** An agent asserted the user had applied for a role because prep materials existed in cloud storage. The application was never submitted, and the wrong context was passed on to a third party.
+**Why:** An agent once told someone the user had applied to a role because prep materials existed in cloud storage. The application had never been submitted, so incorrect context reached a third party.
 
 **How to verify:**
-- **Applications/emails:** Check the sent folder for confirmations
-- **Blog posts:** Check the CMS or the live URL
-- **Deploys:** Check process manager status and server logs
-- **Git pushes:** Check `git log origin/main` or `gh pr list`
-- **Any user action:** Look for the completion artifact, not the preparation artifact
+- **Applications/emails:** Check the sent folder or the confirmation email.
+- **Blog posts:** Check the CMS or the live URL.
+- **Deploys:** Check process manager status and server logs.
+- **Git pushes:** Check `git log origin/main` or `gh pr list`.
+- **Any user action:** Look for the completion artifact, not the preparation artifact.
 
 ## Rule Digest
 
 One line per lesson.
 
-- **Self-deploy loop prevention:** Never deploy or restart a service from within a job that service spawned.
-- **Restart-recovery loop:** A deploy triggered externally while a recoverable job runs can loop forever (deploy, kill, restart, recover, deploy); cap recovery attempts per job and defer deploys while jobs are active.
-- **Restart storm detection:** More than 5 restarts in under 5 minutes is a storm: `pm2 stop` it first, read the logs, fix the root cause, then start it again.
-- **Key storm detection on the right counter:** Use PM2's `unstable_restarts` (crash-loop counter that resets), not `restart_time` (cumulative, never resets), or every long-lived process eventually looks like a storm.
-- **Bash `pipefail` + `grep -c` silent failure:** Use `grep -c 'pattern' || true`. `grep -c` already outputs `0` on no match; it just needs the exit code suppressed, not a fallback echo.
-- **A pipeline reports the LAST command's exit code:** Never end a pipeline with `&& echo "<success>"`; the message proves nothing about earlier stages.
-- **A blanket rename across executable files is a destructive edit:** A repo-wide `sed` looks like a rename and behaves like a rewrite. Scope it to the files you intend, review the diff, and run the tests before committing.
-- **Programmatic edits to a shared config must preserve formatting:** Rewriting a JSON config with `json.dump(...)` reformats the whole file. Make a targeted edit or preserve the original indentation and key order.
-- **Regenerating from a source of truth deletes whatever only exists live:** When a live artifact (crontab, DNS zone, firewall ruleset, service config) is generated from a checked-in file, the source drifts behind as soon as anyone edits live. Diff live against source and back-port before regenerating.
-- **Headless Claude CLI needs an explicit permission mode:** Every `claude -p` invocation without a TTY (cron, subprocess, server route, background job) must pass `--dangerously-skip-permissions` or an equivalent non-interactive permission setting, or it hangs waiting for approval.
-- **Claude CLI rate-limit detection in service wrappers:** After collecting stdout from any `claude -p` subprocess, check for rate-limit patterns before treating the output as valid.
+- **Self-deploy loop prevention:** Never deploy or restart a service from inside a job that service spawned.
+- **Restart-recovery loop:** If a deploy is triggered from outside while a recoverable job is running, it can loop forever (deploy, kill, restart, recover, deploy). Cap recovery attempts per job, and defer deploys while jobs are active.
+- **Restart storm detection:** More than 5 restarts in under 5 minutes is a storm. Run `pm2 stop <name>` (or your process manager's equivalent) first, read the logs, fix the root cause, then start it again.
+- **Restart storm metric:** Base storm detection on a counter that resets, such as PM2's `unstable_restarts`. Do not use a cumulative counter like `restart_time`, which never resets and eventually flags every healthy long-lived process.
+- **`pipefail` + `grep -c` silent failure:** Use `grep -c 'pattern' || true`. `grep -c` already prints `0` when nothing matches, so the exit code only needs suppressing; adding a fallback `echo 0` prints the count twice.
+- **A pipeline reports the LAST command's exit code:** Never end a pipeline with `&& echo "<success>"`, because the message can print even when an earlier stage failed.
+- **A blanket rename across executable files is a destructive edit:** A repo-wide `sed` looks like a rename but behaves like a rewrite. Scope it to the files you have reviewed and check the diff.
+- **Programmatic edits to a shared config must preserve formatting:** Rewriting a JSON config with `json.dump(...)` reformats the **whole file**. Make targeted edits, or keep the original key order and indentation.
+- **Regenerating from a source of truth deletes whatever exists only live:** When a live artifact (crontab, DNS zone, firewall ruleset, service config) is generated from a checked-in source, the source falls **behind** as soon as someone edits the live copy. Diff live against source and back-port the differences before you regenerate.
+- **Headless Claude CLI needs an explicit permission mode:** Every `claude -p` run without a TTY (cron, subprocess, server route, background job) must set a permission mode that cannot block on an interactive prompt, such as `--dangerously-skip-permissions` in a sandbox or a scoped allowlist. Otherwise it hangs or exits silently.
+- **Claude CLI rate-limit detection in service wrappers:** After collecting stdout from any `claude -p` subprocess, check it for rate-limit patterns before treating it as valid output.
 - **`set -e` makes post-hoc exit-code capture dead code:** Capture the exit code in the same statement (`cmd || rc=$?`) so `set -e` never sees the failure.
-- **`set -e` kills functions ending in a guarded `&&`:** Write `if [ -n "$VERBOSE" ]; then log "$*"; fi` (a false `if` returns 0), or end the function with `|| true` or an explicit `return 0`.
-- **Cron output redirects into root-owned dirs die silently:** A non-root crontab line redirecting into `/var/log/` fails before the job runs. Log to a user-writable path.
-- **Unattended jobs that take irreversible external actions:** A job that spends, sends, cancels or files needs five guards: gate on identity, cap the magnitude, an idempotency state file, a `--dry-run` that stops just before the irreversible call, and a report on every outcome.
-- **Health monitor self-exclusion:** Any monitoring daemon that iterates `pm2 jlist` must exclude its own process name from health checks.
-- **Shared poller resource gates must be scoped to the executing machine:** A memory or disk gate in a poller shared across hosts must check the host that will run the work, with a flag to skip the gate where it does not apply.
-- **A repo's main checkout must never be left on a merged feature branch:** Verify the branch is a strict subset of `origin/<default>` (`git diff origin/main HEAD --stat` empty or default-only), then `git checkout main && git merge --ff-only`.
-- **Never inline single-quoted code in `ssh host 'block'`:** The whole remote command is already single-quoted, so inner quotes break it. Pipe a script over stdin (`ssh host 'bash -s' < script.sh`) instead.
-- **Use SSH config aliases, not bare IPs:** `ssh <ip>` skips the `Host` entry that carries the correct user and key, and fails with "Permission denied (publickey)".
-- **Audit the Claude Code version on every host before upgrading:** Pin fan-out and search defaults explicitly so an upgrade doesn't silently change behavior.
-- **Unpinned Docker installs make rebuilds a silent no-op:** Pin versions so a rebuild actually changes something. Probes via `docker exec` run as root by default and can false-alarm on auth; exec as the user the service runs as.
-- **Strict network allowlist sandboxing may not work in Docker bridges or on WSL:** Test it on the actual host before relying on it.
-- **Classify before recovering:** A recovery action that cannot fix the condition must be gated on classifying the condition first.
-- **A retry cap must not be spent on an infrastructure outage:** A bounded-retry loop (MAX_ATTEMPTS, cron every N minutes) permanently kills every in-flight job when a dependency is down longer than cap x interval.
-- **A 429 or 503 is a verdict on the dependency's quota, not on the row:** Refund the retry attempt.
-- **A watchdog that kills out of band must set a kill reason:** Otherwise the death reads as success.
-- **A two-signal liveness check is only as strong as its weaker signal:** A silently empty extraction degrades it without warning; treat an empty signal as a failure, not a pass.
-- **A recurring job that reports only on success makes an outage indistinguishable from a quiet day:** Report failures and skips too.
-- **A boot-only reaper misses jobs stranded inside a still-running process:** Reap on a timer, not only at startup.
-- **A skipped step reported as informational text will stay skipped forever:** Make skipped steps fail or warn loudly.
-- **A destructive remedy must be gated on a positive match:** Never gate it on "not one of the known-benign cases".
-- **One Claude Code session on WSL2 can OOM the whole VM:** That kills every session and every service at once. Cap WSL memory in `.wslconfig` (requires `wsl --shutdown` to apply) and watch per-session memory.
-- **WSL start-at-boot scheduled tasks must run as the distro-owning user (S4U), not SYSTEM.**
-- **`systemctl --user` may be unavailable on WSL (no user D-Bus):** Keep healing and automation bus-free (cron, PM2, plain scripts).
-- **A desynced PM2 God daemon makes `pm2 restart` fail "Process <id> not found" for every process:** Only `pm2 update` or `pm2 resurrect` fixes it, and that touches all services, so it is a human decision.
-- **A benign-skip guard on a nightly job needs a consecutive-skip backstop:** Alert after N consecutive skips.
-- **A stale Claude Code CLI can accept a newer `--model` id and silently serve an older model:** Verify the served model (`--output-format json`, read `modelUsage`) on the exact host and PATH in use, not just that the flag was accepted; login shells can resolve a different `claude` binary than interactive ones.
-- **Headless `claude -p` batch callers:** Size the timeout to real concurrency (fixed timeouts silently kill large prompts), pin `--model` and `--effort` explicitly, and exit non-zero on any item's failure, including empty stdout.
+- **`set -e` kills functions that end in a guarded `&&`:** Write `if [ -n "$VERBOSE" ]; then log "$*"; fi` instead (an `if` whose condition is false returns 0), or end the function with `|| true` or an explicit `return 0`.
+- **Cron output redirected into root-owned dirs dies silently:** A non-root crontab line that redirects into `/var/log/` fails before the command even runs. Log to a directory the cron user owns.
+- **Unattended jobs that take irreversible external actions:** A job that spends, sends, cancels or files something needs five guards: a check on identity, a cap on magnitude, an idempotency state file, a `--dry-run` that stops just before the irreversible call, and a report on every outcome.
+- **Health monitor self-exclusion:** Any monitoring daemon that calls `pm2 jlist` and loops over processes must exclude its own process name from the health checks.
+- **Shared poller resource gates must be scoped to the executing machine:** If several machines share a polling function, a memory or disk gate must measure the host that will run the work. Add a flag such as `skipMemoryWatchdog` for callers on other hosts.
+- **Never leave a repo's main checkout on a merged feature branch:** First confirm the current branch is a strict subset of `origin/<default>` (`git diff origin/main HEAD --stat` should be empty or show only default-branch changes). Then run `git checkout main && git merge --ff-only origin/main`.
+- **Never inline single-quoted code in `ssh host 'block'`:** The whole remote command is already wrapped in single quotes, so any single quote inside the block ends the string. Use a quoted heredoc (`ssh host bash -s <<'EOF'`) or copy a script over and run it.
+- **Use the SSH config alias, not a bare IP:** `ssh x.x.x.x` skips the `Host` entry that carries the correct user and key, and fails with "Permission denied (publickey)".
+- **Audit the Claude Code version on every host before upgrading:** Pin fan-out and search defaults first, because new versions can change them.
+- **Unpinned Docker installs make rebuilds a silent no-op:** Cached layers keep the old version. Pin versions so a rebuild actually changes something. Also, `docker exec` runs as root by default, so probing a user-installed CLI's auth that way false-alarms; pass `-u <user>`.
+- **Sandbox strict network allowlists may not work everywhere:** Settings such as `sandbox.network.strictAllowlist` can break inside Docker bridge networks or on WSL hosts. Test on the actual host before you rely on them.
+- **A recovery action that cannot fix the condition must be gated on classifying the condition first:** Restarting a process cannot fix an expired credential or a full disk. Find out what is wrong before you act.
+- **A retry cap must not be spent on an infrastructure outage:** A bounded-retry loop (MAX_ATTEMPTS, cron every N minutes) permanently kills every in-flight job when a dependency is down longer than cap x interval. Don't count outage failures against the cap.
+- **A 429 or 503 from a dependency is about its quota, not about the row:** Refund the retry attempt.
+- **A watchdog that kills processes out of band must record a kill reason:** Otherwise the death looks like a normal exit and gets recorded as success.
+- **A two-signal liveness check is only as strong as its weaker signal:** If extraction of one signal silently returns empty, the check is weakened without any warning. Treat an empty signal as a failure.
+- **A recurring job that emails only on success makes an outage look like a quiet day:** Report every run, or alert when an expected report is missing.
+- **A boot-only reaper misses jobs stranded inside a process that is still running:** Reap on a schedule too, not just at startup.
+- **A skipped step reported as informational text will be skipped indefinitely:** Make skips fail or surface as warnings that need action.
+- **Gate a destructive remedy on a positive match:** Never gate it on "not one of the known-benign cases".
+- **On WSL2, one heavy session can OOM the whole VM:** That kills every session and every service at once. Cap WSL memory in `.wslconfig` (it takes effect after `wsl --shutdown`) and keep concurrent heavy builds to a minimum.
+- **A WSL start-at-boot scheduled task must run as the user who owns the distro (S4U logon), not SYSTEM:** Under SYSTEM it starts the wrong instance or nothing at all.
+- **`systemctl --user` fails on hosts with no user D-Bus (common on WSL):** Write heal and automation scripts so they don't need the bus, using cron, the process manager, or direct commands.
+- **A long-lived PM2 daemon can desync so that `pm2 restart` reports "Process <id> not found" for every process:** Only `pm2 update` or `pm2 resurrect` fixes it. That restarts all services, so a human should approve it.
+- **A benign-skip guard on a nightly job needs a consecutive-skip backstop:** Alert after N skips in a row, so a guard stuck on "skip" doesn't disable the job forever.
+- **A stale Claude Code CLI can accept a newer `--model` id and quietly serve an older model:** Check the model actually served (`--output-format json`, read `modelUsage`) on the exact host and PATH in use. Don't stop at confirming the flag was accepted, because login shells can resolve a different `claude` than interactive ones.
+- **A headless `claude -p` batch caller needs three things:** a timeout sized for real concurrency, an explicit `--model` and `--effort`, and a non-zero exit if any item fails.
+- **For a logical delete that updates an index and also removes a resource irreversibly, write the index first and remove the resource last:** A crash between the two steps then leaves an orphaned resource you can recover, instead of an index row that is stuck and can't be deleted.
+- **Clear a retry/backoff cooldown with a success check right after the corrective action, not only on the next scheduled poll:** Otherwise a success that is consumed instantly still waits out the old cooldown before the system can respond to the next need.

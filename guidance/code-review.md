@@ -64,11 +64,11 @@ When opening a PR, also verify:
 
 Some configuration properties look like dead code but are essential for production. Never remove these during fix or cleanup runs without verifying the deployment context:
 
-- **NextAuth/Auth.js**: `basePath`, `redirectProxyUrl`, provider `authorization.params`, `token.params`. These are required for subpath deployments behind reverse proxies; the OAuth callback URL is built from them.
+- **NextAuth/Auth.js**: `basePath`, `redirectProxyUrl`, provider `authorization.params`, `token.params`. These are required for subpath deployments behind reverse proxies; removing them breaks the OAuth callback URL.
 - **PM2 ecosystem.config.js** (or your process manager's equivalent): `env`, `max_memory_restart`, `cwd`. These are essential for production process management.
-- **Reverse-proxy config references in code**: URL construction that includes basePaths or proxy prefixes.
+- **Reverse proxy config references in code**: URL construction that includes basePaths or proxy prefixes.
 
-**Why:** an automated crash-fix run removed `basePath` and `redirectProxyUrl` from an app's auth config because nothing in the repo appeared to read them. That broke OAuth on the subpath deployment and needed a manual restore. "Unused in the code" is not proof of "unused in production".
+**Why:** an automated crash-fix run removed `basePath` and `redirectProxyUrl` from an app's auth config because they appeared unused. That broke OAuth on the subpath deployment and needed a manual restore. "Looks unused" is not evidence when the consumer is the deployment environment rather than the code.
 
 ## Default Review Workflow: Review-Ship-Review
 
@@ -123,10 +123,11 @@ Each reviewer agent should:
 
 ## Rule Digest
 
-One line per lesson. Each is a check to run against your diff.
+One line per lesson, in the order they were learned.
 
 - **Error Detail Leak Prevention**: Never expose raw error messages, stack traces, internal paths, hostnames, or database connection strings in HTTP responses.
 - **Command Injection: exec vs execFile**: Never use `child_process.exec()` with string interpolation for user-influenced values.
+- **Command Injection Where There's No Args-Array Escape Hatch**: `tmux send-keys`, `ssh host '<cmd>'`, a cron line, `osascript -e 'do shell script ...'`: the target has no `execFile`-style separate-args form, so the only defense is validating the value against an explicit allowlist/regex *before* it is interpolated into the string (e.g. a `case "$val" in opt1|opt2|...) ;; *) exit 1 ;; esac` gate on a CLI flag that gets typed into a live shell via `tmux send-keys`).
 - **Prisma globalThis Singleton: Always Cache in Production**: The standard Next.js Prisma pattern only caches the client in development.
 - **Shell to Script Data Passing: Use Temp Files**: Never embed JSON or structured data into script strings via shell variable expansion.
 - **Timezone Offsets: Never Hardcode**: Don't use fixed UTC offsets like `timedelta(hours=-4)` or `new Date().getTimezoneOffset()` for business logic that must respect DST transitions.
@@ -149,7 +150,7 @@ One line per lesson. Each is a check to run against your diff.
 - **A control-character escape in an Edit can land as a literal byte and turn the file binary, so grep goes silent**
 - **Adding a config passthrough makes every previously-harmless typo in that key a live value**
 - **Re-verify an absence claim in a backlog item before implementing it; one grep of the canonical file is not proof**
-- **A fix documented as a property of one file never reaches its siblings**: when a behavioural fix (browser UA, unverifiable-status bucket, per-request AbortController) is made to one of several similar modules with its constants declared local to that file, the siblings keep the bug. Put shared fixes in a shared module and apply them to every sibling in the same change.
+- **A fix documented as a property of one file never reaches its siblings**: A behavioural fix (browser UA, unverifiable-status bucket, per-request AbortController) made to one HTTP probe, with its constants declared local to that file, leaves every sibling probe still broken. Put the fix in a shared module and apply it to all siblings.
 - **A display tag is not a handle: persist the user id whenever a record may later need to address that user**
 - **Turning a 500 into a successful empty response makes a previously-unreachable client state reachable; check what the consumer renders for zero rows before merging the guard**
 - **A narration strip must cover both ends of the artifact, not just where it starts**
@@ -163,7 +164,7 @@ One line per lesson. Each is a check to run against your diff.
 - **A threshold that moves with the input cannot be equality-compared against a counter that outlives it**
 - **A stemmer/lookup that strips to a bare key must try the index's actual citation form first, or it silently hits an unrelated entry**
 - **A relative-step control (+/- keys, arrow buttons) must read the same value the UI displays, not a separately persisted value**
-- **A page-level loading gate must be scoped to the initial load, not toggled on every refetch**: if the same `loading` flag both gates the initial render and gets set by an inline mutation's refetch, any inline action (a "mark used" button, a row toggle) blanks the whole page to the placeholder and bounces scroll to top.
-- **An ordered suffix/prefix-stripping list where one entry ends with another must NOT default to longest-match-first**: check which side of the boundary the shared character belongs to before choosing an order, and measure both orderings over the whole dataset.
-- **A marker-strip regex needs `\s+`/`\b` before the marker, never `\s*`; and a guard `pattern.test(x) && x.includes(c)` degenerates to plain `includes(c)` whenever `pattern` makes `c` optional**: both silently widen what the regex matches past what the author intended.
+- **A page-level loading gate must be scoped to the initial load, not toggled on every refetch**: if the same `loading` flag both gates the initial render and gets set by an inline mutation's refetch, any inline action (a "mark used" button, a row toggle) blanks the whole page to the placeholder and bounces scroll to top
+- **An ordered suffix/prefix-stripping list where one entry ends with another must NOT default to longest-match-first**: check which side of the boundary the shared character belongs to before choosing an order, and measure both orderings over the whole dataset
+- **A marker-strip regex needs `\s+`/`\b` before the marker, never `\s*`; and a guard `pattern.test(x) && x.includes(c)` degenerates to plain `includes(c)` whenever `pattern` makes `c` optional**: both silently widen what the regex matches past what the author intended
 - **A bounded `take`/`LIMIT` window needs an explicit `orderBy` with a unique tiebreaker, or ranking becomes an arbitrary sample and pagination becomes non-deterministic**

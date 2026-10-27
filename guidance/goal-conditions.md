@@ -1,17 +1,17 @@
 <!-- Load when: /goal for headless runners: mission-file pattern, condition rules, BLOCKED escape hatch -->
 # /goal Conditions for Headless Runners
 
-Claude Code >= 2.1.139 supports `/goal <condition>`. The session keeps re-prompting itself, turn after turn, until a small evaluator model judges the condition satisfied. Then it stops. In headless mode the goal string is the prompt: `claude -p "/goal ..."`. The point is that a run no longer ends because "the session decided it was done". It ends because "the session proved it was done". This enforces "verify before claiming completion" and "paste evidence, then claim" at the harness level.
+Claude Code >= 2.1.139 supports `/goal <condition>`. The session re-prompts itself turn after turn until a small evaluator model judges the condition satisfied, then stops. In headless mode the goal string IS the prompt (`claude -p "/goal ..."`). This turns "the session decided it was done" into "the session proved it was done". It enforces "verify before claiming completion" and "paste the evidence, then make the claim" at the harness level.
 
 ## Where to use it
 
-- **Cron and scheduled runners** (daily dev runners, periodic review or learnings passes, fix-checkers): wrap them in a shared helper, for example `runner_claude_goal` in your runner library.
-- **Templated task jobs** dispatched from a bot or queue: pass a generic goal condition. Let a per-template `goal` field override it.
-- **Conversational or question-answering jobs:** leave these goal-less on purpose. A question should not loop on a completion condition.
+- **Scheduled or cron runners** (daily dev runners, review passes, fix checkers): wrap them in a shared helper that composes the goal, applies the guards below, and falls back to a plain run.
+- **Templated task jobs** dispatched from a bot or queue: give them a generic completion condition, and let each template override it with its own `goal` field.
+- **Conversational request jobs should not have a goal.** A question must not loop on a completion condition.
 
 ## The mission-file pattern
 
-The goal condition is capped at 4000 characters, so a large runner prompt cannot be inlined. Write the full prompt to a mission file, then use:
+The goal condition is capped at 4000 characters, so you cannot inline a large runner prompt. Write the full prompt to a mission file, then:
 
 ```
 /goal Read and execute the mission briefing at <path>. This goal is achieved when
@@ -22,34 +22,27 @@ cannot be completed.
 
 ## Rules for writing conditions
 
-1. **The transcript must be able to demonstrate it.** The evaluator only reads the conversation. It never runs commands. "All tests pass" is a bad condition. "The full test command output is pasted, showing it passes" is a good one.
+1. **Only use conditions the transcript can demonstrate.** The evaluator reads the conversation. It never runs commands itself. "All tests pass" is a bad condition; "the full test command output is pasted showing it passes" is a good one.
 2. **Always include the `BLOCKED:` escape hatch.** Without it, an unmeetable condition loops until the timeout kills the run, and the partial work gets reported as a plain failure.
-3. **Name the legitimate no-work outcome.** Some runners can correctly do nothing (no delta since the last run, PR cap reached). Put that outcome in the condition, or quiet runs will loop hunting for work.
-4. **Don't send `/goal` on `--resume`.** An active goal is restored with the session. Sending `/goal` again replaces it and orphans the original condition. Guard every consumer against this.
-5. **Version-guard and fall back.** If the CLI is older than 2.1.139, or the composed condition is over the cap, fall back to a plain (goal-less) run. A goal must never be the reason a cron produces nothing.
+3. **Cover the legitimate no-work path.** If a runner can correctly do nothing (no new input, PR cap reached), name that outcome in the condition. Otherwise quiet runs will loop hunting for work.
+4. **Skip goals on `--resume`.** An active goal is restored along with the session. Sending `/goal` again replaces it and orphans the original condition. Every consumer must check for this.
+5. **Check the CLI version and fall back.** Run without a goal when the CLI is older than 2.1.139 or the composed condition is over the cap. A goal must never be the reason a cron produces nothing.
 
-## Traps
+## Three traps
 
-1. **Always close stdin in goal mode.** Bash herestrings and heredocs larger than the ~64KB pipe capacity are backed by seekable temp files, not pipes. Your runner may have already drained stdin into the mission file. Even so, `claude -p` re-reads fd0 from position 0 and appends it to the positional prompt. The whole mission then leaks into the goal condition and blows the 4000-char cap. Small prompts travel over pipes and pass, so smoke tests miss this: it only fires above the size threshold. Run every goal invocation with `< /dev/null`.
+1. **Always close stdin in goal mode.** Bash herestrings and heredocs larger than the pipe capacity (about 64KB) are backed by seekable temp files, not pipes. The runner may already have copied stdin into the mission file, but `claude -p` still re-reads fd0 from position 0 and APPENDS it to the positional prompt. The whole mission then leaks into the goal condition and goes over the 4000-char cap. Small prompts go through pipes and work fine, which is why smoke tests miss this: it only happens above the size threshold. Run every goal invocation with `< /dev/null`.
+2. **A rejected goal looks like a success.** The CLI reports a too-long condition as a normal result: `subtype: success`, `is_error: false`, exit 0, `num_turns: 0`, cost $0, with the error text as the result. Runners that only check the exit code log it as DONE. If the result is posted anywhere shared, the error text spreads further. Check the result for `"Goal condition is limited"` and rerun without a goal, and treat any goal run with `num_turns: 0` as suspect.
+3. **A status update can be accepted as the final message.** A run can end with `stop_reason: end_turn`, `subtype: success`, exit 0, many turns in, where the last message is just progress narration ("Waiting for the subagent to finish before finalizing..."). That is not the structured completion report and not a `BLOCKED:` message. If the caller trusts exit 0, it logs DONE, moves its watermarks forward, and whatever the subagent was doing is lost with no error and nothing to retry. **Mitigation:** don't rely on the exit code alone. After the run, have the caller check the result for the same markers the condition requires (the structured block, or a `BLOCKED:` prefix). If neither is there, treat the run as failed. This check happens in the caller and does not fix the evaluator; why the evaluator accepts a status update as final is still unknown.
 
-2. **A rejected goal looks like a success.** When the condition is too long, the CLI still returns a normal-looking result: `subtype: success`, `is_error: false`, exit 0, `num_turns: 0`, cost $0, with the error text as the result. A runner that checks only the exit code logs this as DONE. If that result gets posted to a shared journal or log, the error text can spread into other sessions' context. Detect `"Goal condition is limited"` in the result and rerun without a goal. Treat any goal run with `num_turns: 0` as suspect.
+## Extracting structured output from goal transcripts
 
-3. **A status update can be accepted as the final message.** A goal run can end with `stop_reason: end_turn`, `subtype: success`, exit 0, and a last message like "Waiting for the subagent to finish before finalizing the run." That is in-progress narration. It is not a structured completion report and not a `BLOCKED:` message. If the caller trusts the exit code, it logs DONE, advances its watermarks or delta gates, and silently drops whatever the in-flight subagent was doing. Nothing is left to retry. **Mitigation:** don't trust the exit code alone. After the run, have the caller check the result for the same markers the condition requires (the structured summary block, or a `BLOCKED:` prefix). If neither is there, treat the run as a failure. This is a caller-side safety check. It does not fix the evaluator, and the evaluator's root cause was never confirmed.
-
-4. **Boilerplate that names your fields can shadow the real values.** Suppose you regex-extract structured fields (`REPO:`, `PR:`, `FILES_CHANGED:` and so on) from the transcript with a first-match, head-anchored pattern (`head -c N | grep -oP ... | head -1`). Any injected preamble that lists those field names will match first: a goal-condition preamble, a template echo, a system reminder. The real summary usually comes last, often past the head window. The result:
-   - Free-text patterns capture junk, such as a trailing comma.
-   - Digit-only patterns find nothing and silently default to 0.
-   - Downstream gates keyed on those values (for example "run the post-run verify only if PR > 0") switch off without any error.
-
-   When the real value is documented to be the final output of the turn, anchor to the **last** match and the **tail** of the text (`tail -c N`, `tail -1`). Replay the fixed parser against real logs before trusting it.
+If the caller pulls structured fields (for example `REPO:`, `PR:`, `FILES_CHANGED:`) out of the transcript with grep or regex, watch for framework boilerplate that names the same fields. A goal preamble or template echo near the start of the transcript might contain `(SUMMARY:, REPO:, PR:, ...)`. A first-match extraction over the start of the transcript then grabs the trailing comma as the "value", while digit-only fields find no match and quietly default to 0. Downstream gates that depend on those values (for example "run the verify step only when PR > 0") then silently stop running. When the real value is documented as the last output of the turn, use the LAST match and search the end of the text (`tail -c N`, `tail -1`), not the first match from the start (`head`).
 
 ## Operational notes
 
-- **Cost:** the evaluator is a small model and costs little. Goal runs do take more turns than single-pass runs, so keep goal-wrapped crons behind your usage or budget gate.
-- **Silence:** with the default text output, a headless goal run prints nothing until the condition is met. Use `--output-format stream-json --verbose`, or the run will look hung.
+- **Cost:** the evaluator (a small model) costs very little, but goal runs take more turns than single-pass runs. Keep goal-wrapped crons behind your usage or budget gate.
+- **Silence:** with default text output, a headless goal run prints nothing until the condition is met. Use `--output-format stream-json --verbose` or the run will look hung.
 - **Timeouts still apply.** The goal loops inside your existing `timeout` wrapper, so a looping goal cannot outlive the runner's time budget.
-- **Stop hooks:** `/goal` registers a session-scoped, prompt-based Stop hook. The harness manages it. Leave it out of any custom Stop-hook classification or safety tiers you maintain.
-- **Hooks must be on,** and the workspace trust dialog must be accepted. `disableAllHooks` disables `/goal` as well.
-- **A runner's lock file only serializes the runner against itself.** It does not block a copy of the same mission file that someone runs by hand. Before running a lock-guarded runner's mission manually, check whether the lock belongs to a live process.
-  - **First, check ownership:** if the lock's PID is an ancestor of your own shell, you *are* the runner's dispatched child. Proceed, and never report `BLOCKED:` for this.
-  - Make this explicit for the child: add an ownership header to its prompt, or write an owner sidecar file next to the lock. Otherwise runs can kill themselves by detecting their own parent's lock.
+- **Stop hooks:** `/goal` registers a session-scoped, prompt-based Stop hook. The harness manages it, so it does not need the review you would give a custom Stop hook.
+- **Hooks must be enabled** and the workspace trust dialog accepted. `disableAllHooks` also disables `/goal`.
+- **A runner's lock file only stops it from running twice; it does not stop a manually re-dispatched copy of the same mission.** Before running a lock-guarded runner's mission by hand, check whether the lock belongs to a live child process. **But first check ownership: if the lock PID is an ancestor of your own shell, you ARE the runner's dispatched child, so carry on and never report `BLOCKED:`.** Make this explicit with an ownership header in the child's prompt and an owner sidecar file next to the lock. Without it, children can detect their own parent's lock and kill themselves.
