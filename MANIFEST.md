@@ -38,7 +38,7 @@ Wire `--check` into CI so a new guidance file cannot land undiscoverable. A file
 | `guidance/resource-awareness.md` | server resource checks |
 | `guidance/secrets-hygiene.md` | secret rotation, history rewrite, detection patterns |
 | `guidance/service-hardening.md` | restricting a service to a VPN/private interface, auditing whether a port is actually exposed, hardening a host-installed service after its installer ran, or hardening a Docker/container service for long-running reliability |
-| `guidance/shell-portability.md` | writing or debugging a shell script that has to run on BOTH Linux/WSL hosts and a Mac |
+| `guidance/shell-portability.md` | writing or debugging a shell script that has to run on both Linux/WSL hosts and a Mac |
 | `guidance/stop-hook-safety.md` | tiered stop hook classification, guard library, Tier 3 recursion prevention |
 | `guidance/testing.md` | writing and running tests, cross-layer invariants |
 | `guidance/when-to-fan-out.md` | when to spawn subagents (Task fan-out / parallel bash / Workflow) vs stay single-agent; concurrency-safe 3-phase pattern |
