@@ -1,42 +1,43 @@
 <!-- Load when: tiered stop hook classification, guard library, Tier 3 recursion prevention -->
 # Stop Hook Safety
 
-Stop hooks fire every time a Claude CLI session exits. That includes pipe-mode (`-p`) sessions started by autonomous scripts, subagents and other hooks. This makes them good for enforcement, and it also means they can recurse.
+Stop hooks fire on every Claude CLI session exit. That includes pipe-mode (`-p`) sessions started by autonomous scripts, subagents and other hooks. This makes them powerful for enforcement and dangerous for recursion.
 
 ## Tier Classification
 
-Every stop hook belongs to one of three tiers, based on how risky it is.
+Each stop hook belongs to one of three tiers, based on its risk:
 
 ### Tier 1: Observation (fire-and-forget)
 - Token tracking, desktop or tray notifications, logging
 - Does not invoke Claude and does not block
-- Timeout: 5-15 seconds
+- Timeout: 5-15s
 - Risk: effectively zero
-- Examples: a token-usage tracker, a notification hook
+- Examples: a token-usage tracker, a desktop notification hook
 
-### Tier 2: Verification (can block, does not invoke Claude)
-- Deploy health checks and gates for unpushed code
+### Tier 2: Verification (can block, no Claude)
+- Deploy health checks, gates for unpushed code
 - Can return `{"decision":"block"}` to keep the session alive
 - Does not invoke Claude, so it cannot recurse
-- Timeout: 15-30 seconds
-- Risk: it can delay session exit, but it cannot loop
+- Timeout: 15-30s
+- Risk: can delay session exit, but cannot loop
 - Examples:
   - a post-deploy health check
   - an unpushed-commits check
-  - a context-docs check that bounces the session once when its commits add functionality without updating the project's CLAUDE.md or context file
-  - an evidence audit that bounces a final message that points to output "shown above" that isn't there, or claims a passing test suite without including the output
+  - a context-docs check that bounces once when the session's commits add functionality without updating CLAUDE.md or context.md
+  - a report-evidence check that bounces a final message pointing at something "shown above" that isn't there, or claiming a green test suite without pasting the output
+  - a push-notification enforcer that bounces once per turn when an interactive turn ran tools but its last tool call was not a notification (it skips headless runs)
 
 ### Tier 3: Claude-invoking (DANGEROUS)
-- Session scoring, analysis, or any post-processing that uses an LLM
-- **Can recurse forever** without proper guards
+- Session scoring, analysis, or any other post-processing that calls an LLM
+- **Can recurse infinitely** without the right guards
 - Must use every mandatory safeguard below
-- Timeout: 60 seconds max for the Claude subprocess
+- Timeout: 60s max for the Claude subprocess
 - Must run in the background and never block session exit
 - Example: a session-scoring hook
 
 ## Mandatory Safeguards for Tier 3 Hooks
 
-Put the common guards in one shared guard library, for example `hooks/lib/stop-hook-guard.sh`, and source it from every Tier 3 hook. Don't copy the guard logic into each hook; copies drift apart.
+Put the first three safeguards in a shared guard library, for example `hooks/lib/stop-hook-guard.sh`. Every Tier 3 hook then sources it:
 
 ```bash
 #!/usr/bin/env bash
@@ -49,15 +50,15 @@ stop_hook_init "my-hook-name" --invokes-claude
 
 ### What the guard library must provide
 
-1. **Env var circuit breaker.** Export `CLAUDE_HOOK_<NAME>=1` before invoking Claude. Check for it on entry and exit if it is set. This stops the hook from firing on sessions it started itself.
+1. **Env var circuit breaker.** Export `CLAUDE_HOOK_<NAME>=1` before invoking Claude. Check for it at entry and exit if it is set. This stops the hook from firing on sessions it spawned itself.
 
-2. **Lockfile.** Keep a PID-based lockfile in `/tmp/claude-hook-locks/` so two copies of the same hook can't run at once. Remove it with a `trap`.
+2. **Lockfile.** Keep a PID-based lockfile in `/tmp/claude-hook-locks/` so the same hook can't run twice at once. Remove it with a `trap`.
 
-3. **Rate limiter.** Keep a per-hook invocation counter in `/tmp/claude-hook-rates/`. Default limit: 5 invocations per hour. Prune old entries automatically.
+3. **Rate limiter.** Keep a per-hook invocation counter in `/tmp/claude-hook-rates/`. Default: at most 5 invocations per hour. Prune old entries automatically.
 
 ### Safeguards the hook author must add
 
-4. **Content fingerprinting.** Search the conversation for the hook's own prompt signature. This is the fallback for when the env var guard fails because the shell didn't inherit env vars.
+4. **Content fingerprinting.** Search the conversation for your hook's own prompt signature. The env var guard fails if the shell doesn't inherit environment variables, and this check is the fallback.
 
 ```bash
 CONVERSATION=$(echo "$HOOK_INPUT" | jq -r '.last_assistant_message // empty')
@@ -66,7 +67,7 @@ if printf '%s' "$CONVERSATION" | grep -q 'my unique prompt marker'; then
 fi
 ```
 
-5. **Minimum conversation length.** Skip trivial sessions such as quick Q&A or accidental exits. 200 characters is a good default minimum.
+5. **Minimum conversation length.** Skip trivial sessions such as quick Q&A or accidental exits. A 200-character minimum is a good default.
 
 6. **Background execution.** Run the Claude call in the background so the hook doesn't block session exit:
 
@@ -79,7 +80,7 @@ fi
 exit 0
 ```
 
-7. **Subprocess timeout.** Always wrap `claude -p` in `timeout 60` (or similar) so a hung Claude session can't run forever.
+7. **Subprocess timeout.** Always wrap `claude -p` in `timeout 60` or similar, so a hung Claude session can't run forever.
 
 ## Template: Tier 3 Hook
 
@@ -113,15 +114,15 @@ exit 0
 
 ## Exemption: the /goal Evaluator Hook
 
-`/goal` (Claude Code 2.1.139 and later) registers its own prompt-based Stop hook for the session. After each turn, a small evaluator model checks the goal condition and prompts the session again if the condition isn't met. The harness manages this hook and it only exists while the goal is active, so the tier rules and guard-library requirements above don't apply to it. Don't flag it as an unregistered Tier 3 hook and don't wrap it. It still counts as a loop that invokes Claude, so any runner that uses goals must run behind your usage or budget gate.
+`/goal` (Claude Code >= 2.1.139) registers its own Stop hook, scoped to the session and driven by a prompt. After each turn, a small evaluator model checks the goal condition and re-prompts the session if the condition isn't met. The harness manages this hook, and it exists only while the goal is active. The tier classification and guard-library rules above don't apply to it: don't flag it as an unregistered Tier 3 hook, and don't wrap it. It still counts as a loop that invokes Claude for budget purposes, so any runner that uses goals must sit behind a usage or budget gate.
 
 ## Rules for All Tiers
 
-1. **Always `exit 0` at the end.** A non-zero exit from a stop hook can abort session teardown.
+1. **Always end with `exit 0`.** A non-zero exit from a stop hook can abort session teardown.
 2. **Never retry on failure.** Hooks are fire-and-forget. Log the failure and move on.
-3. **Timeouts are mandatory, and the `timeout` field is in SECONDS.** Set the `timeout` field in settings.json, and use the `timeout` command for subprocesses. Claude Code's per-hook `timeout` field is in seconds (default 600 for command hooks, not enforced on `async: true` hooks). A value written as if it were milliseconds, like `30000`, means 8.3 hours. Stop hooks run in parallel and the session waits for all of them, so one hung `curl` or `ssh` stalls the end of the turn. Use small integers (5-30), and give every synchronous Stop hook its own internal limit (`curl --max-time`, `timeout(1)`) so the harness timeout is never the only limit.
-4. **No interactive prompts.** Stop hooks run without a TTY. Any `read` or interactive Claude session will hang.
-5. **Redact before transmitting.** A hook that sends conversation content anywhere external must strip credentials (tokens, keys, passwords, connection strings) first.
+3. **Timeouts are mandatory.** Set the `timeout` field in settings.json and also use the `timeout` command on subprocesses. The settings.json `timeout` is in **seconds**, not milliseconds. The default is 600 for command hooks, and it isn't enforced on `async: true` hooks. A value like `30000` means 8.3 hours. Use small integers (5-30). Stop hooks run in parallel and the session waits for all of them, so one hung `curl` or `ssh` stalls the end of every turn. Give every synchronous Stop hook an internal bound (`curl --max-time`, `timeout(1)`) so the harness timeout is never the only limit.
+4. **No interactive prompts.** Stop hooks run without a TTY. Any `read` call or interactive Claude session will hang.
+5. **Redact before transmitting.** Any hook that sends conversation content to an external service must strip credentials first: tokens, API keys, passwords, connection strings and webhook URLs.
 
 ## Debugging Hook Issues
 
@@ -129,38 +130,39 @@ Check these in order:
 1. Rate log: `cat /tmp/claude-hook-rates/<hook-name>.log`
 2. Lock state: `ls -la /tmp/claude-hook-locks/`
 3. Env var: `env | grep CLAUDE_HOOK`
-4. Token usage logs: look for clusters of sessions starting close together, which is the signature of recursion
-5. Check that the hook's own log file exists. If a hook is supposed to log and its log file was never created, the hook has never run. Don't count it as enforcement until you've seen it fire.
+4. Token usage log: look for clusters of sessions started close together, which signal recursion
 
 ## Adding a New Stop Hook Checklist
 
-Before adding a new Stop hook to settings.json:
+Before you add any new Stop hook to settings.json:
 
 - [ ] Classified as Tier 1, 2 or 3
-- [ ] Timeout set in settings.json (`"timeout"` field, in seconds)
+- [ ] Timeout set in settings.json (`"timeout"` field, **in seconds**)
+- [ ] Every network or remote call inside the hook has its own timeout
 - [ ] Ends with `exit 0`
-- [ ] If Tier 3: sources the shared guard library with `--invokes-claude`
+- [ ] If Tier 3: uses the guard library with `--invokes-claude`
 - [ ] If Tier 3: has a content fingerprint fallback
 - [ ] If Tier 3: runs Claude in the background with `timeout`
-- [ ] If Tier 3: checks for a minimum conversation length
-- [ ] If Tier 2 (blocking): the block reason tells the agent exactly what to fix
+- [ ] If Tier 3: has a minimum conversation length check
+- [ ] If Tier 2 (blocking): the block reason is actionable and tells the agent what to fix
 - [ ] Tested manually: `echo '{"session_id":"test","transcript_path":""}' | bash hooks/my-hook.sh`
+- [ ] Its log file actually appears after a real session (a hook whose log never appears has never run)
 
-## Lessons from Hook Failures
+## Lessons from Hook and Gate Failures
 
-### A hook that resolves the repo from its own cwd misses most commits
-A hook runs in the session's starting directory, which often isn't the repo being changed. If a PostToolUse or Stop hook runs `git rev-parse` in its own cwd, it never sees `cd X && git commit` or `git -C X commit`, and it can go its whole life without firing once. Work out the target repo from the command itself (a leading `cd`, `-C` arguments), or from a ledger of commits made during the session. Also check that every field the hook reads actually exists in that hook event's input payload. If it reads a missing field, it quietly gets nothing.
-
-### A gate can detect correctly and still report the wrong conclusion
-If a gate reports the wrong category (for example "public repo" for a private one), read the whole path that produces the message before you debug detection. Detection can be correct while a later message is hardcoded and printed no matter what was detected. The usual root cause is duplication: several hooks each carry their own inline copy of logic that a shared library already provides, and the copies drift. Fix it by deleting the copies and calling the library, not by patching each copy separately.
+### Read the whole message path before debugging detection
+A gate can detect a condition correctly and still print the opposite conclusion from a hardcoded message a few lines later. If a gate reports the wrong category, check the code that emits the message before you touch the lookup. This drift usually comes from duplication: several hooks carry their own inline copy of logic that a shared library already provides. The fix is to delete the copies, not to patch each one separately.
 
 ### Never cache the value that decides whether a gate runs without an expiry
-If a gate only blocks under one condition (for example, only when the repo is public), caching that condition forever is dangerous in one direction only. After the condition flips, the stale value turns the gate off silently. Give the cache a TTL. If a lookup fails, fall back to the last known value rather than "unknown", and do not refresh the cache timestamp. Otherwise one transient failure marks a stale entry as fresh for another full TTL.
+If a gate only blocks under one condition (for example "repo is public"), caching that condition forever is asymmetric. When the underlying state flips, the stale cache switches the gate off silently. Give such caches a TTL. If a lookup fails, fall back to the last known value rather than "unknown", and don't refresh the cache timestamp. Otherwise one transient failure marks a stale entry as fresh for another full TTL.
 
 ### Distribution is part of the fix
-Git hooks are copied into each clone's `.git/hooks` (and `init.templateDir` puts them in every new clone), so editing the source changes nothing that's already installed. Make sure your installer reaches every local clone, not just a subset. After any hook edit, grep the INSTALLED copies for a marker from the new code. Reading the source proves nothing about what's running.
+Hooks installed as copies (in each `.git/hooks`, or through `init.templateDir`) don't change when you edit the source. After any hook edit, reinstall to every location that runs it, including locations your installer might skip by default. Then verify by grepping the **installed** copies for a marker from the new code, not by reading the source.
 
-### Test the hook's tests
-- To simulate a missing external binary, stub it. Trimming `PATH` doesn't work if the binary lives in a directory you kept (for example `/usr/bin`), and then the "offline" path is never exercised while the test still reports PASS.
-- Don't call real network APIs from hook tests. A transient 5xx error will fail correct code.
-- Before trusting a new assertion, confirm it FAILS against the pre-fix code. An assertion that passes against both versions proves nothing.
+### Make sure your tests can fail
+- Narrowing `PATH` to simulate a missing binary doesn't work if the binary lives in the directories you kept, and the test reports PASS while the offline path goes untested. Stub the external binary instead.
+- Tests that hit a real API become flaky on transient errors and fail correct code. Stub external calls.
+- Run every new assertion against the pre-fix code and confirm it fails. An assertion that passes on both versions proves nothing.
+
+### Resolve the target repo from the command, not the hook's cwd
+A PostToolUse hook runs in the session's starting directory, which often isn't the repo being changed. A hook that runs `git rev-parse` in its own cwd never sees `cd X && git commit` or `git -C X commit`. Parse the effective directory out of the command, including `cd` prefixes and `-C` args. Read only fields that actually exist in the PostToolUse payload. Before you call a hook "enforced", confirm its log file exists and has entries.

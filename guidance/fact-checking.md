@@ -3,211 +3,171 @@
 
 ## Why this exists
 
-The failure mode is not that the model didn't know. The failure is that it answered anyway, and it decided when to check based on whether a domain *felt* fast-moving. A common pattern:
+The typical failure looks like this. Across several turns of a recommendation thread, an agent states eligibility and benefit rules confidently from model memory. One rule is outdated and another is simply backwards. Both matter to the user's decision, and neither gets corrected until the user pushes back. A third error comes from trusting a stale local notes file over what the user said about their own account.
 
-- An eligibility rule stated confidently from model memory that had since changed.
-- A claim that was simply made up, and backwards.
-- A stale local file trusted over the user's own statement about their own account.
-
-Each of these mattered to a decision the user was about to make. Each one was corrected only after the user pushed back.
+The problem is NOT that the model didn't know. The problem is that it answered anyway, and that it was left to decide for itself whether a domain felt "fast-moving" enough to check.
 
 ## The rule
 
-**If a factual claim is (1) external to your own systems and (2) something the user can act on, verify it with a current search before you assert it. Do not judge for yourself how volatile the topic is.**
+**If a factual claim is (1) external to your own systems and (2) something the user can act on, verify it with a current search before you assert it. Do not judge for yourself how volatile the domain is.**
 
-Covered claim classes (non-exhaustive):
+Covered claim classes (not a complete list):
 - Credit card, bank and issuer rules: bonus eligibility, product-family language, credit stacking, application rules, offer amounts and deadlines
-- Prices, fees, promotions, availability of products or services
+- Prices, fees, promotions, and whether a product or service is available
 - API/SaaS pricing, rate limits, model names, deprecations
 - Software versions, EOL dates, breaking changes
 - Legal, policy and immigration facts, program rules, published schedules
+- A price, availability window or status figure read from a browser, page reader or API call: quote the exact string or number you saw, inline, next to the claim. If you cannot quote it, you have not verified it.
 
-Not covered: anything about the user's own accounts, infrastructure, repos or history. Check those against the actual source instead (database, email, git, the user's own statement).
+Not covered (check against internal sources instead): anything about the user's own accounts, infrastructure, repos or history. For those, the real source (database, email, git, the user's own statement) is the check, not model memory and not a curated summary file.
 
-## Procedure: a fact-check pass
+## Procedure
 
-Before you post a research-type answer (recommendations, comparisons, eligibility, how-much or what-happens-if questions), run the draft through a fact-check pass. Use a skill or subagent if you have one. The pass:
+Before posting a research-type answer (recommendations, comparisons, eligibility questions, "how much" or "what happens if" questions), put the draft through a fact-check pass. A skill is ideal if you have one. The pass:
 
-1. Extracts each separate external, actionable claim from the draft.
-2. Runs a web search per claim that includes the current year (run these in parallel).
-3. Gives each claim a verdict: CONFIRMED / OUTDATED / CONTRADICTED / UNVERIFIED.
-4. Requires you to revise the answer for anything not CONFIRMED, and to label UNVERIFIED claims as unverified in the final answer.
+1. Pulls out each discrete external, actionable claim in the draft
+2. Runs a web search per claim that includes the current year (in parallel)
+3. Gives each claim a verdict: CONFIRMED / OUTDATED / CONTRADICTED / UNVERIFIED
+4. Requires you to revise anything not CONFIRMED, and to label UNVERIFIED claims as unverified in the final answer
 
-For a single claim mid-conversation, a direct web search with the current month and year in the query is an acceptable lighter version. The search must actually run before you post the claim.
+For a single claim mid-conversation, a direct web search with the current month and year in the query is an acceptable lighter version. The search must still happen before you post the claim.
 
 ## Precedence of sources
 
-1. **The user's own statement about their own accounts and actions.** This beats everything for facts about whether something exists. If internal data disagrees, the data is stale: say so, check the real source, and fix the data.
-2. **Current primary and web sources** (issuer terms pages, official docs, reputable specialist trackers). These are required for external rules and offers.
-3. **Internal curated files** (notes, your knowledge base). These are authoritative only for what they own (benefit details, member numbers). They never decide external rules, and they never override the user.
-4. **Model memory.** Never enough for a covered claim. It suggests the hypothesis; the search confirms it.
+1. **The user's own statement about their own accounts or actions** beats everything for facts about whether something exists. If internal data disagrees, the data is stale: say so, check the real source, and fix the data.
+2. **Current primary and web sources** (issuer terms pages, official docs, established deal and rules trackers) are required for external rules and offers.
+3. **Internal curated files** (notes, your knowledge base) are authoritative only for what they own (benefit details, member numbers). They never decide external rules and never override the user.
+4. **Model memory** is never enough for a covered claim. It produces the hypothesis; the search confirms it.
 
 ## Contradicting your own prior research
 
-Suppose an earlier turn in the same conversation established a researched fact, and you are about to assert the opposite. Treat that as a red flag, not a correction. Search again and reconcile it out loud ("earlier I found X; the search now shows Y because Z"). Never flip silently.
+If an earlier turn in the same conversation established a researched fact and you are about to assert the opposite, treat that as a red flag, not a correction. Search again and reconcile out loud ("earlier I found X; the search now shows Y because Z"). Never flip silently.
 
 ## Deliverable URL liveness
 
-Any URL you put in a deliverable that leaves your own systems (resume, portfolio, cover letter, social post, anything sent or published) is a fact someone else can check. Before writing it, curl the exact URL. Confirm it serves the intended public page: HTTP 200 and a real page, not a redirect to a login and not a bare API. Don't write the URL until the check passes. Don't ship a hedge like "confirm live status" about something you could check in seconds.
+Any URL you put in a deliverable that leaves your own environment (resume, portfolio, cover letter, social post, anything sent or published) is a fact someone outside can check. Before writing it, curl the exact URL and confirm it serves the intended public page: HTTP 200 plus a real page, not a redirect to login and not a bare API. Only write it once the check passes. Do not ship a hedge like "confirm live status" for something you could verify in seconds.
 
 None of these prove a URL is live:
-- The repo exists on disk.
-- The service shows as running in the process manager. A running service with only `/api/*` routes serves no page anyone can browse.
-- A memory or index line says "LIVE". Memories record one moment and often mean "deployed", not "public page exists". Read the full memory, then still curl the URL.
+- a repo exists on disk (that says nothing about a public URL);
+- a process manager shows the service as `online` (a service with only `/api/*` routes has no page to browse);
+- a memory or index line says "LIVE" (memories are snapshots and often mean "deployed", not "a public page exists"; read the full memory, then curl anyway).
 
-Lesson: a product was once listed in a resume as public based only on an index line and an `ls`. Its public path returned 404 because it was an internal, key-gated API.
+Lesson: a path once went onto a resume as a public product when it was an internal API that 404s at the root and needs an auth header. The only evidence behind it was an index line and a directory listing.
 
-### Private GitHub repo URLs return 404 anonymously: an auth artifact, not proof of breakage
+### Private GitHub repo URLs 404 anonymously: an auth artifact, not proof of breakage
 
-An unauthenticated request (curl, a web fetch tool, a public link checker) to a `github.com/<org>/<private-repo>/blob/...` URL returns **404, not 403**. GitHub hides private repos from callers who can't see them. Unless you know to check with auth, that 404 looks exactly like a broken or renamed path. To verify a link into a private repo, use the authenticated API instead of anonymous curl:
-
-```bash
-gh api repos/<org>/<repo>/contents/<path>
-```
-
-A 200 with a `size` field means the file is live. A 404 from `gh api` (unlike one from curl) is a real miss. This is the mirror image of the login-wall case above: that one is a false positive (a 200 that is really dead behind auth); this one is a false negative (a 404 that is really alive behind auth).
+An unauthenticated request (curl, a fetch tool, a public link checker) to a `github.com/<org>/<private-repo>/blob/...` URL returns **404, not 403**. GitHub does not confirm a private repo exists to someone who can't see it, so the response looks exactly like a broken or renamed path. To check a link into a private repo, use `gh api repos/<org>/<repo>/contents/<path>` instead of anonymous curl. A 200 with a `size` field means it's live; a 404 from `gh api` (unlike from curl) is a real miss. This is the mirror image of the login wall: that one is a false positive (a 200 that is dead behind auth), this one is a false negative (a 404 that is alive behind auth).
 
 ## "Known / reputable brand" is a factual claim: verify provenance
 
-Calling a brand "known", "established", "reputable" or "trusted" is a claim someone can check, not flavor text. Don't base it on marketplace star counts or review volume. Those are the fake-review signals a skeptic check is meant to catch; using them for credibility just launders them. Before you apply any such label, run one search (`who makes <brand>` / `<brand> company history`) and classify the brand:
-- **Established:** an independent company with a history you can verify and distribution beyond a single marketplace.
-- **Marketplace-native label:** an invented seller brand (often an all-caps or nonsense word) sold mainly on one or two big marketplaces with no independent history. Never call these "known brands". They can still be fine budget picks, but justify that with specific evidence, not borrowed reputation.
+Calling a brand "known", "established", "reputable" or "trusted" is a checkable claim, not decoration. Do not base it on marketplace star counts or review volume. Those are the exact fake-review signals a skeptic gate is meant to catch, and using them here turns them into borrowed credibility. Before using any such label, run one search (`who makes <brand>` / `<brand> company history`) and classify the brand:
+- **Established:** an independent company with a history you can verify and distribution beyond one marketplace.
+- **Marketplace-native label:** an invented seller brand (often an all-caps or nonsense word) sold mostly on one or two big marketplaces with no independent history. Never call these "known brands". They can still be fine budget picks, but justify that with specific evidence, not borrowed reputation.
 
-Don't contradict your own skeptic check. Warning readers about "no-name" products while presenting same-tier marketplace labels as "known brands" in the same guide is exactly the failure this rule prevents.
+Don't contradict your own skeptic gate. A guide that warns about "no-name" products as a trap and then lists same-tier marketplace labels as "known brands" is exactly the failure this rule is meant to prevent.
 
-## Aggregator tables age, issuer pages block, some sites are unreachable
+## Source-specific traps
 
-When researching crowd-sourced data (for example, which merchants trigger a card's category credit):
+### Aggregate tracker tables go stale; issuer pages block fetchers; some forums are blocked to search
 
-1. Aggregate tracker tables are often the best source, but individual data points can be years old. Always pull the date column, cite how old it is, and treat "works" / "does not work" as unproven rather than settled. Plain-text extraction plus grep often keeps dates that a summarizing fetch tool drops.
-2. Issuer terms pages often return 403 to automated fetchers. If so, take the terms from two independent secondary sources, and say in the answer that you didn't read the issuer page directly.
-3. Some forums are blocked to the search tool. Use an aggregator or a direct page reader for crowd data instead.
+When researching which merchants trigger a card's category statement credit:
+1. Community-maintained aggregate tables are the best overall source, but individual data points can be many years old. Always extract the date column (a text-only page reader plus grep works better than a summarizing fetch tool, which tends to drop dates), cite how old the data is, and treat "works" / "does not work" as unproven.
+2. Issuer benefit terms pages often return HTTP 403 to automated fetchers. If so, get issuer terms from two independent secondary sources, and say that you did, rather than implying you read the issuer directly.
+3. Some forum domains are blocked to web search tools. Get crowd-sourced data points from an aggregator or a page reader instead.
 
-What this means in practice: recommend a test transaction before the user commits to anything that rests on one old data point, and list the evidence gaps in the deliverable.
+In practice: recommend a test charge before the user commits to a merchant whose coding rests on one old data point, and list the evidence gaps in the deliverable.
 
-## Eligibility on a marketing or FAQ page is not evidence: read the form
+### Eligibility on a marketing or FAQ page is not evidence: read the sentence on the application form
 
-A library's public page may say out-of-area residents can apply online while the live application form says, word for word, that only residents can. A research pass that reads only marketing pages will report "eligible", and the agent will then submit a false eligibility claim. The same shape shows up with "no CAPTCHA" claims about signup pages that turn out to carry a reCAPTCHA field in shadow DOM.
+An institution's public page may say you are eligible while the live application form says the opposite, word for word. A research pass that only reads marketing pages will report "eligible", and the agent will then submit a false claim. The same goes for claims like "this signup has no CAPTCHA": the live page may have one inside shadow DOM.
 
-Rule: for any signup, eligibility or enrollment task, the authoritative text is what the form you are about to submit shows, read in the browser after the page loads. Treat FAQ pages, marketing copy, guides and search snippets as leads to check, never as the finding. When they conflict with the form, the form wins and you stop.
+Rule: for any signup, eligibility or enrollment task, the authoritative quote is what the form you are about to submit says, read in the browser after the page loads. Treat FAQ pages, marketing pages, guides and search snippets as leads, never as findings. If they conflict, the form wins and you stop.
 
-Corollary: this is also the cheapest place to catch a subagent's overconfident research, so map the form BEFORE filling it in, not after a submit fails.
+Corollary: this is also the cheapest place to catch a subagent's overconfident research, so map the form BEFORE filling it, not after a failed submit.
 
-## Per-bucket minimum prices don't apply to a specific item
+### A per-day cheapest-fare table prices specific departures; re-verify once you name a flight
 
-A "cheapest fare per day" table prices specific departures. If you later recommend one particular flight and carry the day's minimum across, the quote can be wrong. Carriers often run several price bands on one route on one day, keyed to departure time. The error is silent because the number came from your own verified research, so it carries authority it hasn't earned.
+A "cheapest fare per day" figure answers "what does this DAY cost", which is the right question while choosing a day. Once the recommendation names a specific flight or departure time, that number no longer applies: carriers often run several price bands on one route on one day, tied to departure time. The mistake is quiet because the number came from your own verified research, so it carries authority it hasn't earned.
 
-How to apply:
-- Once a recommendation names a specific flight number or departure time, check that flight's own fare before quoting a price. Day-level tables are for day-level decisions.
-- The same applies to hotels (the cheapest nightly rate is not the rate for the room you want) and to any per-bucket minimum.
-- Fares can move by tens of percent within a day. If fare research is more than a day old and the user is about to book, pull it again. A stale price quoted confidently is worse than no price.
+How to apply: once you name a specific flight number or departure time, check that flight's own fare before quoting a price. Keep day-level tables for day-level decisions. The same applies to hotels (a cheapest-per-night figure is not the rate for the room you want) and to any per-bucket minimum.
 
-## A cited page may not carry the claim it was cited for
+Also: fares can move 30%+ within a day. If your fare research is more than a day old and the user is about to book, pull it again rather than quoting it. A stale fare quoted confidently is worse than no fare.
 
-A plausible-looking source URL next to a claim reads as verified. Fetching the exact cited URL again is what separates "this site would know" from "this page says so". Aggregator pages often show only static data, while the live status sits on a different page.
+### A cited aggregator page may not carry the claim it was cited for
 
-How to apply: when you review or reuse someone else's cited claim, fetch the specific URL and confirm the fact appears on that page. If it doesn't, find the page that carries it, or say the claim has only one source. Give the same treatment to operating hours and enforcement windows that decide whether an action is safe or free. Being off by a few hours at one end of an enforcement window can turn a "free" recommendation into a charge.
+A plausible source URL next to a claim looks verified. But the cited page may hold only static data while the live status sits on a different page, or the official source may 404 on every documented path, which leaves the fact resting on one aggregator.
 
-## A number appearing in the source is not a claim check: verify the pairing
+How to apply: when you review or reuse someone else's cited claim, fetch that exact URL again and confirm the fact appears on that page. If it doesn't, find the page that does carry it, or say the claim has a single source. Claims about operating hours or enforcement windows that decide whether the user acts deserve the same check: a window that is wrong by a few hours can turn a "free" recommendation into a fine and hide a hard prerequisite.
 
-A generated answer can cite several prices from different retailers to a single source, and every number really does appear somewhere on that page (for example, historical highs on a single-retailer price-history page). A check that only asks "does this figure appear in a cited source" passes. What is false is the **pairing**: a price tied to a retailer the source never mentions.
+### Finding the number in the source is not checking the claim: verify the pairing
 
-How to apply: verify the claim, not just the number. For each cited sentence, check that:
-1. every money amount appears in a cited source, AND
-2. every entity the sentence attributes something to (retailer, vendor, venue, person) is actually mentioned by that same source.
+An answer can cite several retailer prices to one URL where every number really does appear on that page (for example, historical highs on a single retailer's price-history page), so a check that only asks "is this figure in a cited source?" passes. What's false is the pairing: prices attached to retailers the source never mentions.
 
-A check that stops at (1) will pass plausible multi-entity sentences built by attaching real numbers to the wrong names.
+How to apply: you are verifying the claim, not the number. For each cited sentence, check (1) every money amount appears in a cited source, AND (2) every entity the sentence attributes something TO (retailer, vendor, venue, person) is actually mentioned by that same source. A pass that stops at (1) lets through plausible multi-entity sentences built by attaching real numbers to the wrong names.
 
-## A cited issue number is not a verified issue: check state, closed_at and the LAST comment
+### A cited issue number is not a verified issue: check state, closed_at, and the LAST comment
 
-A bug-tracker URL carries more authority than a blog post, so issue numbers get repeated with less scrutiny. Search summaries tend to reproduce the alarming top of a report (title, symptoms, repro steps) and drop the mundane end (it was the hardware / works as intended / duplicate / fixed in a later version). A whole configuration can get ruled out on the strength of a closed, unconfirmed issue whose reporter later traced the problem to a faulty cable.
+Bug-tracker URLs carry more authority than blog posts, so issue numbers get repeated without scrutiny. Search summaries reliably quote the alarming top of a report (title, symptoms, repro steps) and drop the mundane end (it was the hardware / works as intended / duplicate / fixed in a later version). An issue cited as proof of "data corruption on this setup" can turn out to be closed, labeled unconfirmed, with the reporter's last comment blaming a faulty cable.
 
-Before you treat any tracker item as a constraint on a decision, fetch it and read four fields, none of which is the body:
+Before you repeat a tracker item as a reason to rule something out, fetch it and read these fields (none of them is the body):
 
-```bash
-curl -s https://api.github.com/repos/OWNER/REPO/issues/N | jq '{state,closed_at,labels:[.labels[].name],comments}'
-curl -s https://api.github.com/repos/OWNER/REPO/issues/N/comments | jq -r '.[-1].body'
-```
+    curl -s https://api.github.com/repos/OWNER/REPO/issues/N | jq '{state,closed_at,labels:[.labels[].name],comments}'
+    curl -s https://api.github.com/repos/OWNER/REPO/issues/N/comments | jq -r '.[-1].body'
 
-- `state` and `closed_at` tell you whether the issue is still live.
-- The LAST comment tells you why it closed, which the body never can.
-- Labels separate confirmed bugs from unconfirmed ones.
-- For linked PRs, open, merged and closed-unmerged are three different facts. A closed-unmerged PR is often quoted as if the feature shipped.
+`state` and `closed_at` tell you if it is live. The LAST comment tells you why it closed, which the body never can. Labels separate confirmed from unconfirmed. Apply the same discipline to a linked PR: open, merged and closed-unmerged are three different facts (closed-unmerged PRs are often quoted as if the feature shipped).
 
 Corollaries:
-- Read the rest of the thread, not just the resolution. Other users may report a separate regression that is still unresolved, closed only because the original reporter's problem was fixed.
-- If the dramatic objection collapses, rebuild the recommendation on the boring objections (power, thermals, cost) instead of quietly keeping the conclusion.
+- Read the whole thread, not just the resolution. Other users may report a real, unresolved problem that got buried when the issue closed on the original reporter's cause.
+- When the dramatic objection falls apart, rebuild the recommendation on the dull objections (power, thermals, cost) instead of quietly keeping the conclusion.
 
-## Eliminating an option needs a primary source; ranking it can rest on a secondary one
+### Ruling out an option needs a primary source; ranking it can rest on a secondary one
 
-Ranking an option wrong costs some accuracy in a comparison the reader can still see. Eliminating an option removes it from the reader's choices entirely, and they never learn what they didn't get to weigh. So elimination is the stronger claim and needs stronger evidence: a vendor compatibility matrix, official docs, release notes or a spec sheet, not a blog summary of one.
+Ranking an option wrongly costs some accuracy in a comparison the reader can still see. Ruling an option out removes it from the reader's choices entirely, and they never learn what they didn't get to weigh. So ruling out is the stronger claim and needs stronger evidence: a vendor compatibility matrix, official docs, release notes or a spec sheet, not a blog's summary of one.
 
-Two habits:
-- Check whether the constraint matters at all before building on it. A "doesn't run in environment X" objection is irrelevant if the component never needed to run there (for example, a server reached over HTTP).
-- When a correction lands, fix the error **where a reader hits it**. Edit the original paragraph and link forward. Don't rely on a rebuttal section further down; a reader going top to bottom gets the error first and the correction only if they keep reading.
+Habits that catch this:
+- Check whether the constraint actually matters before building on it. If the component is reached over the network, it may never need to run in the constrained environment at all.
+- When a correction comes in, retract the claim WHERE A READER MEETS IT. A rebuttal far below the false claim means someone reading top to bottom gets the error first. Edit the original paragraph and link forward.
 
-## A benchmark number comes with its harness
+### A benchmark number carries its harness
 
-A throughput figure is a property of a runtime, a build and a set of flags, not just the hardware. Switching inference runtimes or turning on features like speculative decoding can change results severalfold, more than the gap to the next hardware tier. Flags also interact and fail silently: one setting can multiply throughput only when a competing flag is off, and mismatched settings can quietly collapse performance with no error.
+Throughput figures depend on the runtime, the build and the flags, and those can matter more than the next hardware tier (a 3x swing from runtime and decoding choices alone is realistic). Flags also interact and fail silently: one flag can give a big speedup only when another is off, and mismatched settings can collapse performance with no error. Rule: before reasoning from a throughput number, note which build, runtime and flags produced it. Two numbers from the same harness beat two numbers from the same vendor, and a same-harness comparison beats a newer mismatched one.
 
-Rule: before reasoning from a throughput number, record which build, runtime and flags produced it. Prefer two numbers from the same harness over two numbers from the same vendor. When comparing options, a comparison from the same harness beats a newer mismatched one.
+### A supplied parts list or spec sheet describes the past; reconcile it against the live system
 
-## A supplied parts list or spec sheet describes the past: reconcile it before costing work
+A build sheet can be out of date because parts were upgraded later, and the difference can break a constraint (such as a power budget) that the recommendation depends on. Rule: treat every line of a supplied inventory as a claim, check it against something you can measure (`/proc/cpuinfo`, `free`, `nvidia-smi`, `lsblk`, `Get-CimInstance`), and state which lines you confirmed, which you corrected, and which software can't verify (chassis and power supply usually). Don't let the unverifiable lines borrow credibility from the verified ones. On a power supply, the first hard blocker is often the CONNECTOR COUNT rather than the wattage, and no power limit or splitter fixes a missing connector, so read the connector table, not just the rating.
 
-Hardware gets upgraded after spec sheets are written. A different CPU or RAM amount can change a power budget or capacity plan the recommendation depends on.
+### A degraded search backend produces confident, cited fabrication
 
-Rule:
-- Treat each line of a supplied inventory as a claim and check it against something measurable (`/proc/cpuinfo`, `free`, `nvidia-smi`, `lsblk`, `Get-CimInstance`).
-- State which lines you confirmed, which you corrected, and which can't be checked in software (chassis and power supply usually can't). Don't let the unverifiable lines borrow credibility from the verified ones.
-- On a power supply, the first hard limit is often the **connector count** rather than the wattage. No power limit or splitter fixes a missing connector, so read the connector table, not just the rating.
+A RAG pipeline whose metasearch backend has lost most of its engines (suspended, CAPTCHA'd) can return irrelevant results such as category pages, dictionary definitions or unrelated encyclopedia articles. The synthesis model then builds a fluent, cited answer from them, for example a price roughly three times the real one. Grounding can refuse evidence that is obviously unrelated, but it can't tell evidence that answers the question from evidence that only looks like an answer. Citations prove where something came from, not that it is correct.
 
-## A degraded search backend produces confident, cited fabrication
+How to apply: a retrieval pipeline needs a HARD refusal signal for "my retrieval was degraded", separate from any informational degradation field, and every caller must refuse on it (or fall back to another engine) rather than ship a plausible answer. Threshold: one dead search engine is routine flakiness. Two or more means the remaining results are just whatever survived, not a real sample of the web. Two supporting bugs to look for in similar pipelines: a dedup step that returns a NEW array can drop a degradation flag attached to the original array, and a client timeout tuned for a fast, small model can kill a slower model mid-answer, which shows up as an empty result that downstream scoring calls "bad" instead of "failed".
 
-A retrieval pipeline whose search backend has quietly degraded (some engines suspended or CAPTCHA'd, leaving only a weak keyword matcher) will hand the synthesis model irrelevant results, such as category pages and dictionary definitions. The model then builds a fluent, internally consistent, cited answer from them, for example a price several times the real one, cited to an unrelated page. Grounding catches obvious mismatches but can't tell evidence that answers the question from evidence that merely looks like an answer. Citations prove where text came from, never that it is correct.
+### A checklist that assumes a document can silently exclude a whole category of applicant
 
-How to apply:
-- A retrieval pipeline needs a HARD refusal signal for "my retrieval was degraded", separate from any informational degradation field. Every caller must refuse, or fall back to a different engine, when the signal fires, rather than ship a plausible-looking answer.
-- Threshold: one dead search engine is routine flakiness. Two or more means the surviving results are just whatever happened to survive, not a real sample of the web.
-- Check for two bugs that can hide degradation:
-  - A dedup step that returns a NEW array can drop a degradation flag attached to the original array.
-  - A client timeout tuned on a fast or small model can kill a slower model's synthesis mid-answer. The empty result then gets scored as "bad" rather than "failed".
+Official document lists often list COMBINATIONS (for example "foreign passport WITH valid visa + arrival record"). An applicant from a visa-exempt country has no visa foil, so they satisfy no listed row literally, even if a general catch-all clause covers them in practice. That catch-all is at the clerk's discretion, not a published path.
 
-## Document checklists that list COMBINATIONS: check each element
+How to apply: when screening an eligibility or document checklist, break every "A + B + C" row apart and confirm the person can produce EACH element. Flag any element that is impossible for their category (visa-exempt, age-exempt, treaty national) rather than assuming a catch-all will cover it. Also compare the strict list against any fallback or non-compliant product; the fallback may be much easier to get.
 
-Official ID and eligibility lists often list document combinations ("foreign passport WITH valid visa + arrival record"). Visa-exempt nationals have no visa, so they satisfy no listed row literally, even if a regulatory catch-all covers them in practice at the clerk's discretion.
+### Security scan summaries can drop a severity bucket
 
-How to apply:
-- When screening an eligibility or document checklist, expand every "A + B + C" row and confirm the person can produce EACH element.
-- Flag any element that is structurally impossible for their category (visa-exempt, age-exempt, treaty national). Don't assume a catch-all will absorb it.
-- Compare the strict list against any fallback or non-compliant product's list. The fallback is often much easier to obtain.
+An audit-based scanner can report a repo as "1 critical, 0 high" when a direct `npm audit --json` shows many high findings too. The bug shows up in repos that have BOTH critical and high findings. The giveaway is that the summary's header count and its listed entries disagree. When they do, check the repo whose findings are missing before trusting either number. When checking a scan's severity buckets, re-run the real tool on every repo with a critical finding, not just a sample.
 
-## Security scan summaries can silently drop a severity bucket
+### A negative claim about a fast-moving product needs a same-week search
 
-An automated audit sweep can report a repo as "1 critical, 0 high" when a direct `npm audit --json` run shows the critical finding AND a dozen high findings. Scanners that bucket by severity are most likely to lose a bucket exactly where critical and high findings occur in the same repo. A mismatch between the summary's header count and the number of entries listed is a visible fingerprint of the gap.
+Before marking a "this exists / this happened" claim in a deliverable as wrong, run a web search limited to the last 7 days, and give the date of any research file you use as evidence. A current-state inventory a few days old can miss an announcement made in between, and "correcting" a true sentence into a false one is worse than leaving it alone.
 
-How to apply:
-- When a scan's header count and listed-entry count disagree, check the repo whose findings are missing before trusting either number.
-- When verifying severity bucketing, always re-run the real tool on every repo that has a critical finding, not just a sample.
+### A second reviewer's "posting filled / removed" claim needs a live check
 
-## Negative claims about fast-moving products need a search from the same week
+When you merge an external review into your own records, don't copy its claims about whether a job posting is live or what happened verbatim. A "filled" claim may come from a stale or regional cache while the same posting has been re-listed with an active apply button. Check against the live careers page in BOTH directions: a live posting doesn't prove the candidacy is active, and a removed posting doesn't prove rejection. Outcomes given verbally on a call leave no email trail, so mark them "verbal/unresolved, follow-up owed", not dead.
 
-Before flagging a "this exists / this happened" claim in a deliverable as wrong, run a web search limited to the last 7 days, and state the date of any research file you use as evidence. A current-state inventory that is a few days old can miss an announcement made since, and a confident "correction" would replace a true sentence with a false one.
+### Government travel advisories differ in geographic scope: cite several together
 
-## Re-verify a second reviewer's liveness claims in both directions
+Independent government advisories (for example US, UK and Canada) often draw their restricted zones differently for the same city. One may restrict only named districts while another covers the whole city or region. Quoting only the most permissive one quietly drops the others' restricted areas.
 
-When you merge an external review (another model's audit, a colleague's notes) into your own records, don't copy its liveness or outcome claims verbatim. A claim that a job posting is "filled" or "removed" may come from a stale or regional cache while the same posting is live and accepting applications. Apply the rule both ways: a live posting doesn't prove active candidacy, and a removed posting doesn't prove rejection. Re-verify any "filled / removed / no application found" claim before recording a negative. Outcomes delivered verbally (on a call) leave no email record, so a record with no email evidence may be genuinely unresolved rather than closed. Mark it as unresolved with a follow-up owed, not as dead.
+How to apply: when a trip includes a city under any regional advisory, quote all three advisories with their dates, map the recommended hotel or airport area against each, prefer itineraries with the fewest nights in a flagged area, and mention that some travel insurance excludes areas under "avoid" or "reconsider" advice.
 
-## Government travel advisories differ in geographic scope: cite several together
+### Email search summaries can undercount a thread; one address is not the whole contact
 
-Different governments' advisories for the same city can draw restricted zones very differently. One may restrict only named districts, another the whole city, another an entire region except airside transit. Each is an independent primary source, so none is "wrong". Citing only the most permissive one quietly drops the restricted areas in the others.
+Thread search tools may report a message count that misses replies inside an older thread, and a sent-mail search by company domain misses mail sent to a contact's personal address. Either can make you claim a follow-up is owed when it was already sent.
 
-How to apply: when a trip includes a city under any regional advisory, quote at least the US, UK and Canadian advisories with their dates. Map the recommended hotel and airport area against each one, prefer itineraries with fewer nights in a flagged area, and note that some travel insurance excludes areas under "avoid" or "reconsider" advice.
-
-## Mail search summaries can undercount a thread; check every address before claiming a reply is owed
-
-A mail search tool's thread summary can report fewer messages than the thread contains, hiding a reply. A reply may also have gone to a contact's personal address, so a search limited to their company domain misses it.
-
-How to apply: before claiming a thank-you, reply or nudge is owed, or that a process went silent:
-- Open every candidate thread in full and judge from its newest message, not the search summary.
-- Search sent mail by every known address for the contact, including personal ones, plus a full-name search.
-- Exclude your own generated mail from company-name searches.
+How to apply: before claiming a thank-you, reply or nudge is owed, or that a process went silent, open every candidate thread in full and judge by its newest message (not the search summary). Search sent mail by every known address for the contact, including personal ones, and by full name. Exclude your own generated mail from company-name searches.
