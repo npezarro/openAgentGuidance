@@ -27,7 +27,7 @@ npm info <package-name>
 # Check for known vulnerabilities
 npm audit
 
-# Check download stats (popularity ≈ community support)
+# Check download stats (popularity roughly equals community support)
 npm info <package-name> | grep downloads
 ```
 
@@ -69,7 +69,7 @@ npm outdated
 # Update a specific package
 npm install <package>@latest --save-exact
 
-# Update all (be cautious: test thoroughly)
+# Update all (be cautious; test thoroughly)
 npm update
 ```
 
@@ -77,6 +77,16 @@ npm update
 1. Read the changelog for breaking changes.
 2. Run the full test suite.
 3. Test affected features manually if needed.
+
+### npm Arborist Crash on install/audit fix/update: Retry with npx npm@11
+
+On some hosts, `npm install`, `npm audit fix`, and `npm update` can crash inside `Arborist.buildIdealTree` with `Cannot read properties of null (reading 'edgesOut')` for certain dependency trees (seen on npm 10.9.4 across unrelated projects sharing a vitest/jsdom peer chain). This is an npm bug, not a problem with the project's own `package.json`.
+
+**Workaround:** rerun the identical command under `npx -y npm@11 <cmd>`. It resolves the tree and writes a normal `lockfileVersion: 3` lockfile.
+
+Two related traps in the same area:
+- `npm audit fix --force` can propose an absurd downgrade (e.g. `eslint ^10` to `^4`) rather than a sane fix. Bump the one flagged package by hand instead of trusting `--force`.
+- `npm install --ignore-scripts` leaves native modules (e.g. `better-sqlite3`) unbuilt, so tests then fail for reasons unrelated to the change under review. Run `npm rebuild` before judging a test baseline taken after an `--ignore-scripts` install.
 
 ## Removing Dependencies
 
@@ -139,23 +149,26 @@ For deeply nested transitive deps, scope the override to the parent:
 }
 ```
 
+**When to use:** when `npm audit fix` can't resolve the issue and the vulnerable package has a patched version available, but the intermediate dependency hasn't updated yet. This pattern works reliably for common cases such as `uuid`, `axios`, `@hono/node-server`, `esbuild`, and `http-proxy-agent`.
+
 **After adding overrides:**
-1. Delete `node_modules` and `package-lock.json`, then `npm install` to regenerate cleanly.
+1. Delete `node_modules` and `package-lock.json`, then `npm install` to regenerate cleanly. (This is the documented exception to the "never regenerate lockfiles" rule.)
 2. Run `npm audit` to confirm the vulnerability is resolved.
 3. Run `npm test` and `npm run build` to verify no breakage from the version bump.
 4. Commit both `package.json` and `package-lock.json`.
-
-**When to use:** When `npm audit fix` can't resolve the issue and the vulnerable package has a patched version available but the intermediate dependency hasn't updated yet. This pattern generalises well across repos and transitive chains.
 
 ## Dependabot Major Version PRs: Do Not Merge Autonomously
 
 Dependabot's `groups` config bundles minor+patch updates but opens individual PRs for major bumps. **Do not merge major-version Dependabot PRs autonomously, even if CI passes.**
 
-CI passing (`npm ci + npm test + npm run build`) does not guarantee the app behaves correctly with a new major version. Major bumps frequently have runtime behavior changes that tests don't catch:
-- **CSS-framework majors**: config may move from a JS config file to CSS-based config; existing class names can break silently
-- **TypeScript majors**: tighter inference and stricter type narrowing catch things the previous major allowed at runtime
-- **Linter majors**: legacy config formats get dropped; rules and plugins may behave differently
-- **Test-runner majors**: browser mode APIs and parallel test defaults change
-- **Markdown/parser majors**: breaking AST or parser changes for custom renderers
+CI passing (`npm ci` + `npm test` + `npm run build`) does not guarantee the app behaves correctly with a new major version. Major bumps frequently have runtime behavior changes that tests don't catch:
+- **Tailwind v4**: drops `tailwind.config.js` in favor of CSS-based config; existing class names may break silently
+- **TypeScript 6**: tighter inference; stricter type narrowing catches things 5.x allowed at runtime
+- **ESLint 10**: drops legacy `.eslintrc` config format; rules and plugins may behave differently
+- **Vitest 4**: changed browser mode APIs; parallel test defaults changed
+- **marked v18**: breaking AST/parser changes for custom renderers
 
-**Pattern:** Dependabot major PRs are opened individually (not grouped). When reviewing the PR queue, flag these for human review rather than merging silently. The review process: read the release notes and migration guide, check for config format changes, run a local smoke test of the actual app (not just `npm test`).
+**Pattern:** Dependabot major PRs are opened individually (not grouped). When reviewing the PR queue, flag these to the user rather than merging silently. The review process:
+1. Read the release notes and migration guide.
+2. Check for config format changes.
+3. Run a local smoke test of the actual app, not just `npm test`.
